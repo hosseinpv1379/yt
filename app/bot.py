@@ -1,5 +1,6 @@
 import asyncio
 import logging
+from io import BytesIO
 import uuid
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
@@ -17,6 +18,8 @@ from .config import Settings, load_settings
 from .database import Database
 from .openai_limits import ModelLimit, OpenAILimitsUnavailable, get_openai_limits
 from . import ui, model_catalog
+from .downloads import classify_link, download_media, resolve_spotify_track
+from .content import edit_subtitle_line, generate_content
 from .pipeline import (
     JobCancelled,
     OpenAICost,
@@ -55,6 +58,33 @@ class Job:
     billable_minutes: int = 0
     billed_amount_toman: int = 0
     models: model_catalog.ModelSelection | None = None
+    team_glossary: str = ""
+    package_minutes: int = 0
+
+
+@dataclass
+class DownloadJob:
+    id: str
+    user_id: int
+    chat_id: int
+    url: str
+    message_id: int
+    directory: Path
+    kind: str
+    source: str
+    cancel_event: asyncio.Event = field(default_factory=asyncio.Event)
+
+
+@dataclass
+class ContentJob:
+    id: str
+    user_id: int
+    chat_id: int
+    message_id: int
+    subtitle: str
+    kind: str
+    models: model_catalog.ModelSelection
+    cancel_event: asyncio.Event = field(default_factory=asyncio.Event)
 
 
 @dataclass
@@ -70,19 +100,23 @@ class PendingQuality:
     selected_height: int | None = None
     quoted_rate: int = 0
     confirming: bool = False
+    download_source: str = ""
 
 
 class BotState:
     def __init__(self, settings: Settings, database: Database) -> None:
         self.settings = settings
         self.database = database
-        self.queue: asyncio.Queue[Job | None] = asyncio.Queue()
-        self.active: dict[int, Job] = {}
+        self.queue: asyncio.Queue[Job | DownloadJob | ContentJob | None] = asyncio.Queue()
+        self.active: dict[int, Job | DownloadJob | ContentJob] = {}
         self.pending_quality: dict[str, PendingQuality] = {}
         self.pending_by_user: dict[int, str] = {}
         self.admin_editing: dict[int, str] = {}
         self.awaiting_topup: set[int] = set()
         self.awaiting_support: set[int] = set()
+        self.subtitle_editing: dict[int, str] = {}
+        self.content_quotes: dict[str, tuple[int, str, str, int]] = {}
+        self.package_quotes: dict[str, tuple[int, str, int, int, int]] = {}
         self.api_provider = settings.default_api_provider
 
 
@@ -101,6 +135,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await state.database.upsert_user(user, True)
     state.awaiting_topup.discard(user.id)
     state.awaiting_support.discard(user.id)
+    state.subtitle_editing.pop(user.id, None)
     balance = await state.database.get_wallet_balance(user.id)
     await message.reply_text(ui.home_text(balance), parse_mode="HTML", reply_markup=ui.home_keyboard())
 
@@ -111,6 +146,9 @@ async def receive_link(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     if not user or not message or not message.text:
         return
     await state.database.upsert_user(user, True)
+    if user.id in state.subtitle_editing:
+        await _receive_subtitle_edit(update, context)
+        return
     if user.id in state.admin_editing:
         await _save_admin_value(update, state, context.application)
         return
@@ -118,16 +156,17 @@ async def receive_link(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         await message.reply_text("برای حفظ حریم خصوصی، لطفاً در گفت‌وگوی خصوصی ربات پیام بده.")
         return
     url = message.text.strip()
+    source_type = classify_link(url)
     if user.id in state.awaiting_support:
         await _send_support_request(update, context, url)
         return
-    if user.id in state.awaiting_topup and not validate_youtube_url(url):
+    if user.id in state.awaiting_topup and not source_type:
         await _create_charge_request(update, context, url)
         return
-    if validate_youtube_url(url):
+    if source_type:
         state.awaiting_topup.discard(user.id)
     pending_deposit = await state.database.get_user_pending_deposit(user.id)
-    if pending_deposit and pending_deposit["status"] == "awaiting_proof" and not validate_youtube_url(url):
+    if pending_deposit and pending_deposit["status"] == "awaiting_proof" and not source_type:
         submitted = await state.database.submit_deposit_proof(
             pending_deposit["id"], user.id, "text", proof_text=url
         )
@@ -137,8 +176,11 @@ async def receive_link(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         else:
             await message.reply_text("درخواست شارژ پیدا نشد یا منقضی شده است.")
         return
-    if not validate_youtube_url(url):
-        await message.reply_text("لینک معتبر youtube.com یا youtu.be بفرست. برای فرستادن رسید شارژ، ابتدا /charge را بزن.")
+    if source_type == "spotify_unsupported":
+        await message.reply_text("در Spotify فعلاً فقط لینک تک‌آهنگ پشتیبانی می‌شود؛ آلبوم، پلی‌لیست و پادکست پشتیبانی نمی‌شوند.", reply_markup=ui.back_keyboard())
+        return
+    if not source_type:
+        await message.reply_text("لینک یوتیوب، اینستاگرام، تیک‌تاک، X، فیسبوک، ویمئو، آپارات، ساندکلاد یا تک‌آهنگ Spotify بفرست.", reply_markup=ui.back_keyboard())
         return
     if user.id in state.active or user.id in state.pending_by_user:
         await message.reply_text("یک درخواست پردازش باز داری؛ اول آن را کامل کن یا /cancel بزن.")
@@ -156,12 +198,63 @@ async def receive_link(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     )
     state.pending_quality[token] = selection
     state.pending_by_user[user.id] = token
+    if source_type != "youtube":
+        selection.download_source = source_type
+        if source_type == "spotify":
+            text = ("🎵 دریافت آهنگ Spotify\n\nفایل از Spotify دانلود نمی‌شود؛ "
+                    "ربات یک نسخهٔ مشابه در YouTube جست‌وجو می‌کند و ممکن است نتیجه متفاوت باشد.\n\n"
+                    "با زدن دکمه، جست‌وجو و دریافت نسخهٔ مشابه شروع می‌شود.")
+            keyboard = InlineKeyboardMarkup([
+                [ui.button("🔎 دریافت نسخهٔ مشابه MP3", f"dl:{token}:audio", style="primary")],
+                [ui.button("✕ لغو", f"order_cancel:{token}", style="danger")],
+            ])
+        else:
+            text = "📥 دانلود فایل\n\nنوع خروجی را انتخاب کن. این مسیر فقط دانلود است و هزینهٔ پردازش ندارد."
+            keyboard = InlineKeyboardMarkup([
+                [ui.button("🎬 ویدیو", f"dl:{token}:video", style="primary"), ui.button("🎵 فایل صوتی MP3", f"dl:{token}:audio")],
+                [ui.button("✕ لغو", f"order_cancel:{token}", style="danger")],
+            ])
+        await context.application.bot.edit_message_text(text, chat_id=selection.chat_id,
+            message_id=selection.message_id, reply_markup=keyboard)
+        return
     await context.application.bot.edit_message_text(
         "🎬 سفارش جدید  ·  ۱ از ۳\n\nکدام خروجی را می‌خواهی؟\n"
         "📝 زیرنویس: متن فارسی همراه ویدیو\n🎙 دوبله: جایگزینی صدای اصلی با صدای فارسی هوش مصنوعی",
         chat_id=selection.chat_id, message_id=selection.message_id,
         reply_markup=ui.mode_keyboard(token),
     )
+
+
+async def choose_download(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query, user = update.callback_query, update.effective_user
+    if not query or not user:
+        return
+    state = _state(context)
+    try:
+        _, token, kind = (query.data or "").split(":", 2)
+    except ValueError:
+        await query.answer("انتخاب نامعتبر است.", show_alert=True)
+        return
+    selection = state.pending_quality.get(token)
+    if (not selection or selection.user_id != user.id or selection.confirming
+            or selection.download_source not in {"social", "spotify"}
+            or kind not in {"video", "audio"} or (selection.download_source == "spotify" and kind != "audio")):
+        await query.answer("این انتخاب دیگر معتبر نیست.", show_alert=True)
+        return
+    selection.confirming = True
+    try:
+        await query.answer()
+    except Exception:
+        selection.confirming = False
+        raise
+    job_id = uuid.uuid4().hex
+    job = DownloadJob(job_id, user.id, selection.chat_id, selection.url, selection.message_id,
+                      Path(state.settings.work_dir) / job_id, kind, selection.download_source)
+    state.pending_quality.pop(token, None)
+    state.pending_by_user.pop(user.id, None)
+    state.active[user.id] = job
+    await state.queue.put(job)
+    await query.edit_message_text("📥 درخواست دانلود در صف ثبت شد. برای لغو /cancel را بزن.")
 
 
 async def choose_mode(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -249,13 +342,16 @@ async def choose_quality(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     quality = "خودکار" if selected_height is None else f"{selected_height}p"
     mode_label = "زیرنویس فارسی" if mode == "subtitle" else "دوبلهٔ فارسی"
     balance = await state.database.get_wallet_balance(user.id)
+    packages = await state.database.available_minutes(user.id)
+    package = next((p for p in packages if p["mode"] == mode and p["minutes"] >= minutes), None)
+    package_note = f"\nبستهٔ قابل استفاده: {package['minutes']} دقیقه" if package else ""
     await query.answer()
     await query.edit_message_text(
         f"🧾 سفارش جدید  ·  ۳ از ۳\n\nخروجی: {mode_label} · کیفیت: {quality}\n"
         f"مدت قابل محاسبه: {minutes} دقیقه\nتعرفه: {rate:,} تومان در دقیقه\n"
-        f"هزینه: {amount:,} تومان · موجودی: {balance:,} تومان\n\n"
-        "با تأیید، هزینه از کیف پول کم و سفارش وارد صف می‌شود.",
-        reply_markup=ui.confirmation_keyboard(token),
+        f"هزینه: {amount:,} تومان · موجودی: {balance:,} تومان{package_note}\n\n"
+        "روش پرداخت را انتخاب کن؛ پس از تأیید سفارش وارد صف می‌شود.",
+        reply_markup=ui.confirmation_keyboard(token, package["id"] if package else None),
     )
 
 
@@ -264,7 +360,12 @@ async def confirm_order(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     if not query or not user:
         return
     state = _state(context)
-    token = (query.data or "").partition(":")[2]
+    parts = (query.data or "").split(":")
+    if len(parts) not in {2, 3}:
+        await query.answer("سفارش نامعتبر است.", show_alert=True)
+        return
+    token = parts[1]
+    package_id = parts[2] if len(parts) == 3 else None
     selection = state.pending_quality.get(token)
     if not selection or selection.user_id != user.id or not selection.mode or not selection.quoted_rate or selection.confirming:
         await query.answer("این سفارش دیگر قابل تأیید نیست.", show_alert=True)
@@ -278,6 +379,8 @@ async def confirm_order(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     job_id = uuid.uuid4().hex
     try:
         models = await model_catalog.load_selection(state.database, state.settings, selection.api_provider)
+        team = await state.database.team_info(user.id)
+        team_glossary = team["glossary"] if team else ""
         required = [models.stt, models.translation] + ([models.tts] if mode == "dub" else [])
         missing = {item.provider for item in required if not (
             state.settings.openai_api_key if item.provider == "openai" else state.settings.openrouter_api_key
@@ -287,18 +390,26 @@ async def confirm_order(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
             await query.answer("پردازشگر سفارش تنظیم نشده است؛ لطفاً با پشتیبانی تماس بگیر.", show_alert=True)
             return
         await query.answer()
-        balance = await state.database.create_wallet_job(
-            job_id=job_id, user_id=user.id, chat_id=selection.chat_id,
-            url=selection.url, selected_height=selected_height, mode=mode,
-            api_provider=selection.api_provider, billable_minutes=minutes,
-            amount_toman=amount,
-        )
+        if package_id:
+            balance = await state.database.create_package_job(
+                job_id=job_id, user_id=user.id, chat_id=selection.chat_id, url=selection.url,
+                selected_height=selected_height, mode=mode, api_provider=selection.api_provider,
+                billable_minutes=minutes, package_id=package_id)
+        else:
+            balance = await state.database.create_wallet_job(
+                job_id=job_id, user_id=user.id, chat_id=selection.chat_id,
+                url=selection.url, selected_height=selected_height, mode=mode,
+                api_provider=selection.api_provider, billable_minutes=minutes, amount_toman=amount)
+
     except Exception:
         selection.confirming = False
         raise
     state.pending_quality.pop(token, None)
     state.pending_by_user.pop(user.id, None)
     if balance is None:
+        if package_id:
+            await query.edit_message_text("بسته منقضی شده یا دقیقهٔ کافی ندارد. لینک را دوباره بفرست و روش پرداخت دیگری انتخاب کن.")
+            return
         current = await state.database.get_wallet_balance(user.id)
         shortage = max(0, amount - current)
         await query.edit_message_text(
@@ -318,16 +429,17 @@ async def confirm_order(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         selected_height=selected_height, mode=mode,
         api_provider=selection.api_provider, draft_id=int(job_id[:7], 16) or 1,
         can_use_draft=True, billable_minutes=minutes,
-        billed_amount_toman=amount, models=models,
+        billed_amount_toman=0 if package_id else amount, models=models, team_glossary=team_glossary,
+        package_minutes=minutes if package_id else 0,
     )
     state.active[user.id] = job
     await state.queue.put(job)
     try:
         await query.edit_message_text(
-            _progress_text("هزینه از کیف پول کم شد؛ در صف پردازش", 0)
+            _progress_text("سفارش در صف پردازش قرار گرفت", 0)
             + f"\nخروجی: {mode_label} | کیفیت: {quality_label}"
-            + f"\nمبلغ: {minutes} × {rate:,} = {amount:,} تومان"
-            + f"\nموجودی باقی‌مانده: {balance:,} تومان"
+            + (f"\nمصرف از بسته: {minutes} دقیقه · باقی‌مانده: {balance} دقیقه" if package_id else
+               f"\nمبلغ: {minutes} × {rate:,} = {amount:,} تومان\nموجودی باقی‌مانده: {balance:,} تومان")
         )
     except TelegramError:
         logger.exception("Could not edit wallet-job status message %s", job_id)
@@ -373,6 +485,9 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not user or not message:
         return
     await state.database.upsert_user(user, True)
+    if state.subtitle_editing.pop(user.id, None):
+        await message.reply_text("ویرایش زیرنویس لغو شد.", reply_markup=ui.back_keyboard())
+        return
     if user.id in state.awaiting_support:
         state.awaiting_support.discard(user.id)
         await message.reply_text("نوشتن پیام پشتیبانی لغو شد.", reply_markup=ui.back_keyboard())
@@ -394,7 +509,7 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     job = state.active.get(user.id)
     if job:
         job.cancel_event.set()
-        await message.reply_text("درخواست لغو ثبت شد؛ پس از پایان گام فعلی هزینه به کیف پول برمی‌گردد.")
+        await message.reply_text("درخواست لغو ثبت شد؛ پس از پایان گام فعلی متوقف می‌شود." if isinstance(job, DownloadJob) else "درخواست لغو ثبت شد؛ پس از پایان گام فعلی هزینه به کیف پول برمی‌گردد.")
         return
     pending_deposit = await state.database.get_user_pending_deposit(user.id)
     if pending_deposit and pending_deposit["status"] == "awaiting_proof":
@@ -598,10 +713,12 @@ async def history(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     lines = ["📒 گردش کیف پول · زمان‌ها UTC", ""]
     for row in rows:
         sign = "+" if row["amount_toman"] > 0 else ""
-        lines.append(
-            f"{row['created_at']:%Y-%m-%d %H:%M} · {labels.get(row['entry_type'], row['entry_type'])} · "
-            f"{sign}{row['amount_toman']:,} تومان"
-        )
+        description = labels.get(row['entry_type'], row['entry_type'])
+        if row['memo'].startswith("خرید بسته"):
+            description = "خرید بستهٔ دقیقه"
+        elif "محتوای تکمیلی" in row['memo']:
+            description = "محتوای تکمیلی" if row['amount_toman'] < 0 else "بازگشت هزینهٔ محتوای تکمیلی"
+        lines.append(f"{row['created_at']:%Y-%m-%d %H:%M} · {description} · {sign}{row['amount_toman']:,} تومان")
     await message.reply_text("\n".join(lines), reply_markup=ui.wallet_keyboard())
 
 
@@ -611,10 +728,12 @@ async def terms(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         return
     await message.reply_text(
         "📜 شرایط استفاده و حریم خصوصی\n\n"
-        "• هزینهٔ پردازش بر اساس مدت منبع و تعرفهٔ نمایش‌داده‌شده از کیف پول تومانی کم می‌شود.\n"
+        "• هزینهٔ پردازش بر اساس مدت منبع و انتخاب کاربر از کیف پول یا بستهٔ دقیقه کم می‌شود.\n"
+        "• بستهٔ دقیقه برای نوع مشخص و مدت اعتبار اعلام‌شده است؛ در صورت خطای سفارش، دقیقهٔ مصرف‌شده بازمی‌گردد.\n"
+        "• خروجی‌های محتوای تکمیلی هوش مصنوعی ممکن است خطا داشته باشند و پیش از استفاده باید بررسی شوند.\n"
         "• شارژ کارت‌به‌کارت پس از بررسی دستی رسید توسط مدیر به کیف پول اضافه می‌شود؛ ارسال رسید به‌تنهایی به معنی تأیید نیست.\n"
         "• اگر پردازش یا تحویل خروجی به‌دلیل خطای سرویس ناموفق شود، مبلغ همان job به کیف پول برمی‌گردد.\n"
-        "• لینک و محتوای ویدیو برای دریافت، رونویسی و ترجمه نزد ارائه‌دهندگان فنی پردازش می‌شود. فایل‌های موقت پس از پردازش پاک و لینک‌های خروجی پس از مهلت اعلام‌شده حذف می‌شوند.\n"
+        "• لینک و محتوای ویدیو برای دریافت، رونویسی و ترجمه نزد ارائه‌دهندگان فنی پردازش می‌شود. متن زیرنویس و خروجی‌های تکمیلی در دیتابیس ذخیره می‌شوند؛ فایل‌های موقت پس از پردازش پاک و لینک‌های خروجی پس از مهلت اعلام‌شده حذف می‌شوند.\n"
         "• فقط محتوایی را ارسال کن که حق استفاده و پردازش آن را داری و قوانین محل استفاده‌ات را رعایت کن.\n"
         "• پشتیبانی: /paysupport · گردش کیف پول: /history\n\n"
         "با انتخاب «می‌پذیرم»، شرایط بالا را تأیید می‌کنی.",
@@ -691,6 +810,8 @@ async def _show_admin_panel(send, state: BotState, user_id: int) -> None:
          InlineKeyboardButton("➖ کسر از کیف پول", callback_data="admin:wallet:debit")],
         [InlineKeyboardButton("👤 بررسی کاربر", callback_data="admin:wallet:lookup")],
         [InlineKeyboardButton(f"🧾 رسیدهای منتظر بررسی ({stats['pending_deposits']})", callback_data="admin:deposits")],
+        [InlineKeyboardButton("🎟 تنظیم بسته‌های دقیقه", callback_data="admin:packages")],
+        [InlineKeyboardButton("📝 قیمت محتوای تکمیلی", callback_data="admin:contentprices")],
         [InlineKeyboardButton("🤖 مدل‌ها و صدای دوبله", callback_data="admin:models", style="primary")],
         [InlineKeyboardButton("🔌 پردازشگر پیش‌فرض", callback_data="admin:providers")],
         [InlineKeyboardButton("🔄 به‌روزرسانی پنل", callback_data="admin:refresh")],
@@ -709,11 +830,23 @@ async def _show_admin_panel(send, state: BotState, user_id: int) -> None:
 
 async def _show_model_settings(query, state: BotState) -> None:
     selection = await model_catalog.load_selection(state.database, state.settings, state.api_provider)
-    lines = ["🤖 مدل‌های پردازش", ""]
+    lines = ["🤖 مدل‌های پردازش · برآورد هر دقیقه", ""]
+    costs = {}
     for stage, label in model_catalog.STAGE_LABELS.items():
         item = getattr(selection, stage)
-        lines.append(f"{label}: {item.model} · {_provider_label(item.provider)}")
-    lines.extend([f"صدای دوبله: {selection.voice}", "", "انتخاب‌ها برای سفارش‌های بعدی اعمال می‌شوند."])
+        costs[stage] = model_catalog.estimate_cents(stage, item)
+        lines.append(f"{label}: {item.model} · {_provider_label(item.provider)}\n"
+                     f"   {model_catalog.format_dollars(costs[stage])}")
+    subtitle = model_catalog.sum_estimates(costs['stt'], costs['translation'])
+    dubbing = model_catalog.sum_estimates(subtitle, costs['tts'])
+    lines.extend([
+        f"صدای دوبله: {selection.voice}", "",
+        f"جمع زیرنویس: {model_catalog.format_dollars(subtitle)}",
+        f"جمع دوبله: {model_catalog.format_dollars(dubbing)}", "",
+        "فرض برای هر دقیقه ویدیو: رونویسی ۶۰ ثانیه، ترجمه ۳۰۰ توکن ورودی و ۱۵۰ توکن خروجی؛ برای دوبله نیز ۶۰ ثانیه صدای تولیدشده و ۳۰۰ توکن متن ورودی.",
+        "این فقط سناریوی نمونه است؛ بازنویسی، تلاش مجدد، سکوت و تغییر نرخ می‌توانند هزینه را تغییر دهند. مدل ناشناخته یا OpenAI Realtime بدون نرخ قابل‌اتکای دقیقه‌ای، نامشخص نمایش داده می‌شود.",
+        "انتخاب‌ها برای سفارش‌های بعدی اعمال می‌شوند.",
+    ])
     await query.edit_message_text("\n".join(lines), reply_markup=InlineKeyboardMarkup([
         [ui.button("🎧 مدل رونویسی", "admin:model:stt"), ui.button("🌐 مدل ترجمه", "admin:model:translation")],
         [ui.button("🎙 مدل تولید صدا", "admin:model:tts"), ui.button("🗣 صدای گوینده", "admin:voices")],
@@ -729,11 +862,16 @@ async def _show_model_options(query, state: BotState, stage: str) -> None:
     buttons = []
     for index, option in enumerate(options, 1):
         selected = option.model == current.model and option.provider == current.provider
-        lines.append(f"{index}. {'✓ ' if selected else ''}{option.model} · {_provider_label(option.provider)}\n   {option.price}")
+        estimate = model_catalog.estimate_cents(stage, model_catalog.StageSelection(option.provider, option.model))
+        lines.append(f"{index}. {'✓ ' if selected else ''}{option.model} · {_provider_label(option.provider)}\n"
+                     f"   {model_catalog.format_dollars(estimate)}\n   نرخ مبنا: {option.price}")
         buttons.append([ui.button(f"{'✓ ' if selected else ''}{index}. {option.model}", f"admin:setmodel:{option.code}", style="success" if selected else None)])
     lines.extend(["", "قیمت‌ها تقریبی و مربوط به ۱۲ نوامبر ۲۰۲۶ هستند؛ نرخ نهایی را در داشبورد سرویس بررسی کن."])
-    if stage != "stt":
-        lines.append("نرخ‌های توکنی به ازای هر ۱ میلیون توکن هستند؛ هزینهٔ هر ویدیو به مصرف بستگی دارد.")
+    if stage == "translation":
+        lines.append("برآورد نمونه در هر دقیقه: ۳۰۰ توکن ورودی و ۱۵۰ توکن خروجی، بدون تکرار. هزینهٔ واقعی به متن، دستورها و تعداد درخواست‌ها بستگی دارد.")
+    elif stage == "tts":
+        lines.append("برآورد نمونهٔ Gemini: ۶۰ ثانیه صدای تولیدشده (۲۵ توکن در ثانیه) و ۳۰۰ توکن متن ورودی. مدت صدا با ویدیو یکسان نیست و تکرار تولید هزینه را بیشتر می‌کند.")
+        lines.append("برای OpenAI تبدیل قابل‌اتکای دقیقه‌ای در دسترس نیست؛ هزینه با توکن محاسبه می‌شود.")
     buttons.append([ui.button("‹ مدل‌ها", "admin:models")])
     await query.edit_message_text("\n".join(lines), reply_markup=InlineKeyboardMarkup(buttons))
 
@@ -761,6 +899,36 @@ async def admin_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         await query.answer("فقط مدیر دسترسی دارد.", show_alert=True)
         return
     action = (query.data or "").split(":")
+    if action == ["admin", "packages"]:
+        await query.answer()
+        await query.edit_message_text("🎟 تنظیم بسته‌ها\n\nبرای هر نوع، دقیقه، قیمت تومان و روز اعتبار را وارد کن؛ صفر برای غیرفعال‌سازی.",
+            reply_markup=InlineKeyboardMarkup([
+                [ui.button("📝 بستهٔ زیرنویس", "admin:package:subtitle"), ui.button("🎙 بستهٔ دوبله", "admin:package:dub")],
+                [ui.button("‹ پنل مدیریت", "admin:refresh")],
+            ]))
+        return
+    if len(action) == 3 and action[1] == "package" and action[2] in {"subtitle", "dub"}:
+        state.admin_editing[user.id] = f"package_{action[2]}"
+        await query.answer()
+        await query.edit_message_text("سه عدد دقیقه، قیمت تومان و روز اعتبار را با فاصله بفرست؛ نمونه: 100 400000 30\nبرای غیرفعال‌سازی عدد 0 و برای لغو /cancel را بزن.")
+        return
+    if action == ["admin", "contentprices"]:
+        summary = await state.database.get_setting("content_price_summary", "0")
+        social = await state.database.get_setting("content_price_social", "0")
+        await query.answer()
+        await query.edit_message_text(
+            f"📝 قیمت محتوای تکمیلی\n\nخلاصه و جزوه: {int(summary):,} تومان\n"
+            f"بستهٔ تولید محتوا: {int(social):,} تومان\n\nعدد صفر یعنی سرویس غیرفعال است.",
+            reply_markup=InlineKeyboardMarkup([
+                [ui.button("✏️ قیمت خلاصه", "admin:contentprice:summary"), ui.button("✏️ قیمت بسته", "admin:contentprice:social")],
+                [ui.button("‹ پنل مدیریت", "admin:refresh")],
+            ]))
+        return
+    if len(action) == 3 and action[1] == "contentprice" and action[2] in {"summary", "social"}:
+        state.admin_editing[user.id] = f"content_{action[2]}"
+        await query.answer()
+        await query.edit_message_text("قیمت ثابت هر سفارش را به تومان بفرست؛ عدد ۰ سرویس را غیرفعال می‌کند. لغو: /cancel")
+        return
     if action == ["admin", "models"]:
         await query.answer()
         await _show_model_settings(query, state)
@@ -846,6 +1014,23 @@ async def _save_admin_value(update: Update, state: BotState, application: Applic
     key = state.admin_editing.get(user.id)
     if not key:
         return
+    if key in {"package_subtitle", "package_dub"}:
+        raw = message.text.strip().replace(",", "").replace("٬", "")
+        try:
+            if raw == "0":
+                value = "0"
+            else:
+                minutes, price, days = map(int, raw.split())
+                if not (1 <= minutes <= 10000 and 1 <= price <= 1_000_000_000 and 1 <= days <= 365):
+                    raise ValueError
+                value = f"{minutes}:{price}:{days}"
+        except ValueError:
+            await message.reply_text("سه عدد معتبر دقیقه، قیمت تومان و روز اعتبار یا عدد 0 بفرست.")
+            return
+        await state.database.set_setting(f"plan_{key.removeprefix('package_')}", value)
+        state.admin_editing.pop(user.id, None)
+        await message.reply_text("✅ تنظیم بسته ذخیره شد؛ بسته‌های خریداری‌شدهٔ قبلی تغییر نمی‌کنند.")
+        return
     if key == "lookup":
         try:
             target_id = int(message.text.strip())
@@ -902,12 +1087,16 @@ async def _save_admin_value(update: Update, state: BotState, application: Applic
         return
     try:
         price = int(message.text.strip().replace(",", "").replace("٬", ""))
-        if not 1 <= price <= 1_000_000_000:
+        if not (0 if key.startswith("content_") else 1) <= price <= 1_000_000_000:
             raise ValueError
     except ValueError:
         await message.reply_text("یک عدد صحیح تومان بین ۱ تا ۱٬۰۰۰٬۰۰۰٬۰۰۰ بفرست.")
         return
     state.admin_editing.pop(user.id, None)
+    if key in {"content_summary", "content_social"}:
+        await state.database.set_setting(f"content_price_{key.removeprefix('content_')}", str(price))
+        await message.reply_text(f"✅ قیمت سرویس روی {price:,} تومان تنظیم شد؛ صفر به معنی غیرفعال است.")
+        return
     db_key = "price_subtitle_toman_per_minute" if key == "subtitle" else "price_dub_toman_per_minute"
     await state.database.set_setting(db_key, str(price))
     await message.reply_text(f"✅ نرخ {('زیرنویس' if key == 'subtitle' else 'دوبله')} روی {price:,} تومان/دقیقه تنظیم شد.")
@@ -943,7 +1132,7 @@ async def menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         _state(context).awaiting_topup.discard(user.id)
         _state(context).awaiting_support.discard(user.id)
         await query.message.reply_text(
-            "🎬 سفارش جدید\n\nلینک ویدیوی YouTube را همین‌جا بفرست.\n"
+            "🎬 سفارش جدید\n\nلینک یوتیوب یا رسانهٔ شبکه‌های اجتماعی را همین‌جا بفرست.\n"
             f"حداکثر مدت ویدیو: {_state(context).settings.video_max_minutes} دقیقه.",
             reply_markup=ui.back_keyboard())
     elif action == "pricing":
@@ -952,7 +1141,8 @@ async def menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         state = _state(context)
         if user.id in state.active:
             job = state.active[user.id]
-            label = "زیرنویس" if job.mode == "subtitle" else "دوبله"
+            label = ("دانلود" if isinstance(job, DownloadJob) else "محتوای تکمیلی" if isinstance(job, ContentJob) else
+                     "زیرنویس" if job.mode == "subtitle" else "دوبله")
             await query.message.reply_text(
                 f"📦 سفارش فعال\n\nنوع: {label}\nشمارهٔ سفارش: {job.id[:8]}\n"
                 "وضعیت دقیق در پیام پیشرفت سفارش نمایش داده می‌شود.",
@@ -968,9 +1158,11 @@ async def menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         job = _state(context).active.get(user.id)
         if job:
             job.cancel_event.set()
-            await query.message.reply_text("درخواست لغو ثبت شد؛ پس از پایان گام فعلی هزینه به کیف پول برمی‌گردد.", reply_markup=ui.back_keyboard())
+            await query.message.reply_text("درخواست لغو ثبت شد؛ پس از پایان گام فعلی متوقف می‌شود." if isinstance(job, DownloadJob) else "درخواست لغو ثبت شد؛ پس از پایان گام فعلی هزینه به کیف پول برمی‌گردد.", reply_markup=ui.back_keyboard())
         else:
             await query.message.reply_text("سفارش فعالی برای لغو وجود ندارد.", reply_markup=ui.back_keyboard())
+    elif action == "team":
+        await team_command(update, context)
     elif action == "history":
         await history(update, context)
     elif action == "terms":
@@ -1190,6 +1382,414 @@ def _format_model_limit(item: ModelLimit) -> str:
     return " • ".join(parts)
 
 
+def _parse_package_plan(value: str) -> tuple[int, int, int] | None:
+    try:
+        minutes, price, days = map(int, value.split(":"))
+        return (minutes, price, days) if 1 <= minutes <= 10000 and 1 <= price <= 1_000_000_000 and 1 <= days <= 365 else None
+    except (ValueError, TypeError):
+        return None
+
+
+async def packages_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query, user = update.callback_query, update.effective_user
+    if not query or not user or not query.message or query.message.chat.type != "private":
+        return
+    state = _state(context)
+    parts = (query.data or "").split(":")
+    action = parts[1] if len(parts) > 1 else ""
+    if action == "list":
+        await query.answer()
+        active = await state.database.available_minutes(user.id)
+        lines = ["🎟 بسته‌های دقیقه", ""]
+        for p in active:
+            lines.append(f"{'زیرنویس' if p['mode'] == 'subtitle' else 'دوبله'}: {p['minutes']} دقیقه · انقضا {p['expires_at']:%Y-%m-%d %H:%M} UTC")
+        if not active:
+            lines.append("بستهٔ فعالی نداری.")
+        buttons = []
+        for mode, label in (("subtitle", "زیرنویس"), ("dub", "دوبله")):
+            plan = _parse_package_plan(await state.database.get_setting(f"plan_{mode}", "0"))
+            if plan:
+                minutes, price, days = plan
+                lines.append(f"\n{label}: {minutes} دقیقه · {price:,} تومان · اعتبار {days} روز")
+                buttons.append([ui.button(f"خرید بستهٔ {label}", f"packs:quote:{mode}")])
+        lines.append("\nخرید از کیف پول فعلی انجام می‌شود. بسته‌ها با هم تجمیع نمی‌شوند و فقط برای نوع انتخابی قابل استفاده‌اند.")
+        buttons.append([ui.button("⌂ منوی اصلی", "menu:home")])
+        await query.message.reply_text("\n".join(lines), reply_markup=InlineKeyboardMarkup(buttons))
+        return
+    if action == "quote" and len(parts) == 3 and parts[2] in {"subtitle", "dub"}:
+        mode = parts[2]
+        plan = _parse_package_plan(await state.database.get_setting(f"plan_{mode}", "0"))
+        if not plan:
+            await query.answer("این بسته فعال نیست.", show_alert=True)
+            return
+        minutes, price, days = plan
+        token = uuid.uuid4().hex[:12]
+        state.package_quotes[token] = (user.id, mode, minutes, price, days)
+        await query.answer()
+        await query.edit_message_text(f"🧾 بستهٔ {'زیرنویس' if mode == 'subtitle' else 'دوبله'}\n"
+            f"{minutes} دقیقه · {price:,} تومان · اعتبار {days} روز از زمان خرید\n\n"
+            "با تأیید، مبلغ از کیف پول کم می‌شود. در سفارش بعدی می‌توانی پرداخت از بسته را انتخاب کنی.",
+            reply_markup=InlineKeyboardMarkup([[ui.button("✓ تأیید خرید", f"packs:buy:{token}", style="success")], [ui.button("‹ بسته‌ها", "packs:list")]]))
+        return
+    if action == "buy" and len(parts) == 3:
+        quote = state.package_quotes.get(parts[2])
+        if not quote or quote[0] != user.id:
+            await query.answer("این پیشنهاد دیگر معتبر نیست.", show_alert=True)
+            return
+        state.package_quotes.pop(parts[2], None)
+        _, mode, minutes, price, days = quote
+        current = _parse_package_plan(await state.database.get_setting(f"plan_{mode}", "0"))
+        if current != (minutes, price, days):
+            await query.answer("مشخصات بسته تغییر کرده؛ دوباره فهرست بسته‌ها را باز کن.", show_alert=True)
+            return
+        result = await state.database.purchase_minutes(user.id, mode, minutes, price, days)
+        if result != "purchased":
+            await query.answer("موجودی کافی نیست یا بسته معتبر نیست.", show_alert=True)
+            return
+        await query.answer()
+        await query.edit_message_text(f"✅ بستهٔ {minutes} دقیقه‌ای فعال شد؛ اعتبار {days} روز. در خلاصهٔ سفارش می‌توانی استفاده از بسته را انتخاب کنی.", reply_markup=ui.back_keyboard())
+        return
+    await query.answer("گزینهٔ نامعتبر است.", show_alert=True)
+
+
+async def team_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    user, message = update.effective_user, update.effective_message
+    if not user or not message or message.chat.type != "private":
+        return
+    state = _state(context)
+    await state.database.upsert_user(user, True)
+    team = await state.database.team_info(user.id)
+    if team:
+        header = f"👥 تیم: {team['name']} · اعضا: {team['members']}/20\n"
+        role = "مدیر" if team['owner_id'] == user.id else "عضو"
+        header += f"نقش شما: {role}\n\n"
+    else:
+        header = "👥 هنوز عضو تیمی نیستی.\n\n"
+    await message.reply_text(header +
+        "ساخت تیم: /team_create نام تیم\n"
+        "ساخت دعوت یک‌بارمصرف مدیر: /team_invite\n"
+        "پیوستن: /team_join کد\n"
+        "خروج عضو: /team_leave\n"
+        "مدیر: /team_glossary اصطلاح | معادل\n"
+        "مدیر: /team_report و /team_remove شناسه\n\n"
+        "هر عضو از کیف پول خودش استفاده می‌کند. با پیوستن، مدیر آمار تعداد و مدت سفارش‌های بعدی شما را می‌بیند؛ محتوای سفارش‌ها به اشتراک گذاشته نمی‌شود.", reply_markup=ui.back_keyboard())
+
+
+async def team_create(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    user, message = update.effective_user, update.effective_message
+    if not user or not message or message.chat.type != "private":
+        return
+    state = _state(context)
+    await state.database.upsert_user(user, True)
+    name = " ".join(context.args).strip()
+    if not name or len(name) > 120:
+        await message.reply_text("نام تیم را بعد از دستور بنویس؛ حداکثر ۱۲۰ نویسه.")
+        return
+    team_id = await state.database.create_team(user.id, name)
+    await message.reply_text("✅ تیم ساخته شد. برای دعوت /team_invite را بزن." if team_id else "شما هم‌اکنون عضو یک تیم هستی.")
+
+
+async def team_invite(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    user, message = update.effective_user, update.effective_message
+    if not user or not message or message.chat.type != "private":
+        return
+    token = await _state(context).database.create_team_invite(user.id)
+    if not token:
+        await message.reply_text("فقط مدیر تیم می‌تواند دعوت بسازد.")
+        return
+    await message.reply_text(f"🔗 کد دعوت یک‌بارمصرف تا ۴۸ ساعت معتبر است. آن را فقط به عضو موردنظر بده:\n\n/team_join {token}\n\nعضو با پیوستن می‌پذیرد آمار سفارش‌های بعدی‌اش برای مدیر تیم قابل مشاهده باشد.")
+
+
+async def team_join(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    user, message = update.effective_user, update.effective_message
+    if not user or not message or message.chat.type != "private":
+        return
+    state = _state(context)
+    await state.database.upsert_user(user, True)
+    token = context.args[0].strip() if context.args else ""
+    if len(token) != 32 or any(c not in "0123456789abcdef" for c in token):
+        await message.reply_text("کد دعوت معتبر را بعد از /team_join بفرست.")
+        return
+    invite = await state.database.preview_team_invite(token)
+    if not invite:
+        await message.reply_text("دعوت معتبر نیست یا منقضی شده است.")
+        return
+    await message.reply_text(
+        f"👥 دعوت به تیم {invite['name']}\nمدیر: {invite['owner_id']}\n\n"
+        "با پیوستن، مدیر تعداد و مدت سفارش‌های موفق آیندهٔ تو را می‌بیند و واژه‌نامهٔ تیم برای ترجمه استفاده می‌شود. کیف پول و محتوای سفارش‌ها مستقل‌اند.",
+        reply_markup=InlineKeyboardMarkup([[ui.button("✓ پذیرش دعوت", f"team:join:{token}", style="success")], [ui.button("⌂ منوی اصلی", "menu:home")]]))
+
+
+async def team_join_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query, user = update.callback_query, update.effective_user
+    if not query or not user or not query.message or query.message.chat.type != "private":
+        return
+    token = (query.data or "").split(":")[-1]
+    result = await _state(context).database.join_team(user.id, token)
+    texts = {"joined": "✅ به تیم پیوستی. آمار سفارش‌های بعدی برای مدیر تیم قابل مشاهده است؛ کیف پول مستقل می‌ماند.",
+             "member": "ابتدا از تیم فعلی خارج شو.", "full": "ظرفیت تیم کامل است.", "invalid": "دعوت معتبر نیست یا منقضی شده است."}
+    await query.answer()
+    await query.edit_message_text(texts[result], reply_markup=ui.back_keyboard())
+
+
+async def team_remove(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    user, message = update.effective_user, update.effective_message
+    if not user or not message or message.chat.type != "private":
+        return
+    try:
+        target = int(context.args[0])
+        if target <= 0:
+            raise ValueError
+    except (IndexError, ValueError):
+        await message.reply_text("شناسهٔ عددی عضو را بفرست؛ نمونه: /team_remove 123456789")
+        return
+    removed = await _state(context).database.remove_team_member(user.id, target)
+    await message.reply_text("عضو از تیم حذف شد." if removed else "عضو پیدا نشد یا شما مدیر تیم نیستی.")
+
+
+
+async def team_leave(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    user, message = update.effective_user, update.effective_message
+    if not user or not message or message.chat.type != "private":
+        return
+    result = await _state(context).database.leave_team(user.id)
+    await message.reply_text({"left": "از تیم خارج شدی.", "missing": "عضو تیمی نیستی.", "owner": "مدیر تیم نمی‌تواند از تیم خودش خارج شود؛ برای مدیریت با پشتیبانی تماس بگیر."}[result])
+
+
+async def team_glossary(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    user, message = update.effective_user, update.effective_message
+    if not user or not message or message.chat.type != "private":
+        return
+    glossary = " ".join(context.args).strip()
+    if not glossary or len(glossary) > 2000:
+        await message.reply_text("واژه‌نامه را بعد از دستور بفرست؛ حداکثر ۲۰۰۰ نویسه. نمونه: /team_glossary cloud = رایانش ابری ؛ برای پاک‌کردن: /team_glossary -")
+        return
+    saved = await _state(context).database.set_team_glossary(user.id, "" if glossary == "-" else glossary)
+    await message.reply_text("✅ واژه‌نامه برای سفارش‌های بعدی اعضا ذخیره شد." if saved else "فقط مدیر تیم می‌تواند واژه‌نامه را تغییر دهد.")
+
+
+async def team_report(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    user, message = update.effective_user, update.effective_message
+    if not user or not message or message.chat.type != "private":
+        return
+    rows = await _state(context).database.team_report(user.id)
+    if rows is None:
+        await message.reply_text("فقط مدیر تیم به گزارش دسترسی دارد.")
+        return
+    lines = ["📊 گزارش تیم · سفارش‌های موفق از زمان عضویت", ""]
+    lines.extend(f"{row['user_id']}: {row['jobs']} سفارش · {row['minutes']} دقیقه" for row in rows)
+    await message.reply_text("\n".join(lines))
+
+
+async def content_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query, user = update.callback_query, update.effective_user
+    if not query or not user:
+        return
+    state = _state(context)
+    parts = (query.data or "").split(":")
+    action = parts[1] if len(parts) > 1 else ""
+    if action == "list":
+        rows = await state.database.recent_completed_jobs(user.id)
+        await query.answer()
+        if not rows:
+            await query.message.reply_text("هنوز سفارش تکمیل‌شده‌ای با زیرنویس نداری.", reply_markup=ui.back_keyboard())
+            return
+        buttons = [[ui.button(f"{'دوبله' if row['mode'] == 'dub' else 'زیرنویس'} · {row['id'][:8]} · {row['created_at']:%Y-%m-%d}",
+                               f"content:job:{row['id']}")] for row in rows]
+        buttons.append([ui.button("⌂ منوی اصلی", "menu:home")])
+        await query.message.reply_text("📝 سفارش موردنظر را انتخاب کن:", reply_markup=InlineKeyboardMarkup(buttons))
+        return
+    if action == "job" and len(parts) == 3:
+        job_id = parts[2]
+        if not await state.database.owned_subtitle(job_id, user.id):
+            await query.answer("سفارش پیدا نشد.", show_alert=True)
+            return
+        results = await state.database.content_results(user.id, job_id)
+        buttons = [
+            [ui.button("📚 خلاصه و جزوه", f"content:quote:summary:{job_id}"),
+             ui.button("📣 بستهٔ تولید محتوا", f"content:quote:social:{job_id}")],
+            [ui.button("✏️ ویرایش زیرنویس", f"content:edit:{job_id}")],
+        ]
+        for result in results:
+            label = "جزوه" if result['kind'] == "summary" else "بستهٔ محتوا"
+            buttons.append([ui.button(f"⬇️ دریافت دوبارهٔ {label} · {result['created_at']:%Y-%m-%d}", f"content:result:{result['id']}")])
+        buttons.append([ui.button("‹ سفارش‌ها", "content:list")])
+        await query.answer()
+        await query.edit_message_text(f"📝 خروجی‌های سفارش {job_id[:8]}\n\nیکی از گزینه‌ها را انتخاب کن.",
+                                      reply_markup=InlineKeyboardMarkup(buttons))
+        return
+    if action == "result" and len(parts) == 3:
+        saved = await state.database.owned_content_result(user.id, parts[2])
+        if not saved:
+            await query.answer("فایل پیدا نشد.", show_alert=True)
+            return
+        data = BytesIO(saved["text"].encode("utf-8"))
+        data.name = "summary-fa.txt" if saved["kind"] == "summary" else "content-pack-fa.txt"
+        await query.answer()
+        await query.message.reply_document(data, caption="خروجی ذخیره‌شدهٔ سفارش شما")
+        return
+    if action == "edit" and len(parts) == 3:
+        job_id = parts[2]
+        subtitle = await state.database.owned_subtitle(job_id, user.id)
+        if not subtitle:
+            await query.answer("سفارش پیدا نشد.", show_alert=True)
+            return
+        state.subtitle_editing[user.id] = job_id
+        data = BytesIO(subtitle.encode("utf-8")); data.name = "fa.srt"
+        await query.answer()
+        await query.message.reply_document(data, caption="فایل فعلی را ببین و شمارهٔ بخش و متن جدید را در یک خط بفرست؛ نمونه: 12 متن اصلاح‌شده\nبرای لغو /cancel را بزن. تغییر فقط در فایل SRT جدید اعمال می‌شود.")
+        return
+    if action == "quote" and len(parts) == 4 and parts[2] in {"summary", "social"}:
+        kind, job_id = parts[2], parts[3]
+        if not await state.database.owned_subtitle(job_id, user.id):
+            await query.answer("سفارش پیدا نشد.", show_alert=True)
+            return
+        price = max(0, int(await state.database.get_setting(f"content_price_{kind}", "0")))
+        if not price:
+            await query.answer("این سرویس هنوز فعال نشده است.", show_alert=True)
+            return
+        token = uuid.uuid4().hex[:12]
+        state.content_quotes[token] = (user.id, job_id, kind, price)
+        label = "خلاصه و جزوه" if kind == "summary" else "بستهٔ تولید محتوا"
+        await query.answer()
+        await query.edit_message_text(f"🧾 {label}\nهزینه: {price:,} تومان\n\nبا تأیید، هزینه از کیف پول کم می‌شود؛ در صورت خطا بازگردانده می‌شود.",
+            reply_markup=InlineKeyboardMarkup([[ui.button("✓ تأیید و شروع", f"content:buy:{token}", style="success")], [ui.button("‹ بازگشت", f"content:job:{job_id}")]]))
+        return
+    if action == "buy" and len(parts) == 3:
+        quote = state.content_quotes.get(parts[2])
+        if not quote or quote[0] != user.id:
+            await query.answer("این سفارش منقضی شده است.", show_alert=True)
+            return
+        if user.id in state.active or user.id in state.pending_by_user:
+            await query.answer("ابتدا سفارش فعال خود را تمام یا لغو کن.", show_alert=True)
+            return
+        state.content_quotes.pop(parts[2], None)
+        _, job_id, kind, price = quote
+        if int(await state.database.get_setting(f"content_price_{kind}", "0")) != price:
+            await query.answer("قیمت سرویس تغییر کرده؛ دوباره سفارش را باز کن.", show_alert=True)
+            return
+        subtitle = await state.database.owned_subtitle(job_id, user.id)
+        if not subtitle:
+            await query.answer("سفارش پیدا نشد.", show_alert=True)
+            return
+        models = await model_catalog.load_selection(state.database, state.settings, state.api_provider)
+        key = state.settings.openai_api_key if models.translation.provider == "openai" else state.settings.openrouter_api_key
+        if not key:
+            await query.answer("مدل ترجمه در دسترس نیست.", show_alert=True)
+            return
+        order_id = uuid.uuid4().hex
+        status = await state.database.create_content_order(order_id, user.id, job_id, query.message.chat_id, kind, price)
+        if status != "created":
+            await query.answer("موجودی کافی نیست یا سفارش در دسترس نیست.", show_alert=True)
+            return
+        job = ContentJob(order_id, user.id, query.message.chat_id, query.message.message_id, subtitle, kind, models)
+        state.active[user.id] = job
+        await state.queue.put(job)
+        try:
+            await query.answer()
+            await query.edit_message_text("📝 درخواست ثبت شد و در صف پردازش قرار گرفت. لغو: /cancel")
+        except TelegramError:
+            logger.exception("Could not acknowledge content order %s", order_id)
+        return
+    await query.answer("این گزینه دیگر در دسترس نیست.", show_alert=True)
+
+
+async def _receive_subtitle_edit(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    user, message = update.effective_user, update.effective_message
+    if not user or not message or message.chat.type != "private":
+        return
+    state = _state(context)
+    job_id = state.subtitle_editing.get(user.id)
+    old = await state.database.owned_subtitle(job_id, user.id)
+    if not old:
+        state.subtitle_editing.pop(user.id, None)
+        await message.reply_text("سفارش پیدا نشد.")
+        return
+    try:
+        raw_number, replacement = message.text.strip().split(maxsplit=1)
+        changed = edit_subtitle_line(old, int(raw_number), replacement)
+    except ValueError as exc:
+        await message.reply_text(f"ورودی معتبر نیست: {exc}\nنمونه: 12 متن اصلاح‌شده")
+        return
+    if not await state.database.replace_subtitle(job_id, user.id, old, changed):
+        await message.reply_text("زیرنویس هم‌زمان تغییر کرد؛ دوباره تلاش کن.")
+        return
+    state.subtitle_editing.pop(user.id, None)
+    data = BytesIO(changed.encode("utf-8")); data.name = "fa-edited.srt"
+    await message.reply_document(data, caption="✅ فایل SRT اصلاح شد. ویدیوی قبلی و زیرنویس پلیر قبلی خودکار تغییر نمی‌کنند.")
+
+
+async def _run_content_job(application: Application, state: BotState, job: ContentJob) -> None:
+    try:
+        if job.cancel_event.is_set():
+            raise JobCancelled()
+        await _safe_progress(application, job, "📝 در حال تولید محتوای تکمیلی…")
+        result = await asyncio.to_thread(generate_content, job.subtitle, job.kind, state.settings, job.models, job.cancel_event)
+        if job.cancel_event.is_set():
+            raise JobCancelled()
+        document = BytesIO(result.encode("utf-8")); document.name = "summary-fa.txt" if job.kind == "summary" else "content-pack-fa.txt"
+        await application.bot.send_document(job.chat_id, document, caption="✅ محتوای تولیدشده آماده است؛ پیش از انتشار بررسی‌اش کن.")
+        if not await state.database.finish_content_order(job.id, result):
+            raise RuntimeError("Content order status changed before completion")
+        await _safe_progress(application, job, "✅ محتوای تکمیلی ارسال شد.")
+    except Exception:
+        logger.exception("Content order %s did not complete", job.id)
+        try:
+            refunded = await state.database.refund_content_order(job.id)
+        except Exception:
+            refunded = False
+            logger.exception("Could not refund content order %s", job.id)
+        await _safe_progress(application, job, "پردازش کامل نشد. " + ("هزینه به کیف پول برگشت." if refunded else "برای پیگیری با پشتیبانی تماس بگیر."))
+    finally:
+        state.active.pop(job.user_id, None)
+        state.queue.task_done()
+
+
+async def _run_download_job(application: Application, state: BotState, job: DownloadJob) -> None:
+    try:
+        if job.cancel_event.is_set():
+            raise JobCancelled()
+        url = job.url
+        if job.source == "spotify":
+            await _safe_progress(application, job, "🔎 جست‌وجوی نسخهٔ مشابه در YouTube…")
+            url, title = await asyncio.to_thread(resolve_spotify_track, url, state.settings)
+            await _safe_progress(application, job, f"🎵 نسخهٔ پیدا شده: {title}\nدر حال دریافت از YouTube…")
+        else:
+            await _safe_progress(application, job, "📥 در حال دریافت فایل…")
+        if job.cancel_event.is_set():
+            raise JobCancelled()
+        output, title = await asyncio.to_thread(download_media, url, job.kind, job.directory, state.settings, job.cancel_event)
+        if job.cancel_event.is_set():
+            raise JobCancelled()
+        caption = f"✅ {title}" + ("\nنسخهٔ یافت‌شده در YouTube؛ ممکن است با نسخهٔ Spotify متفاوت باشد." if job.source == "spotify" else "")
+        if output.stat().st_size <= 48_000_000:
+            with output.open('rb') as media:
+                if job.kind == "audio":
+                    await application.bot.send_audio(job.chat_id, media, caption=caption, read_timeout=120, write_timeout=120)
+                else:
+                    await application.bot.send_video(job.chat_id, media, caption=caption, supports_streaming=True, read_timeout=120, write_timeout=120)
+        elif state.settings.download_base_url:
+            suffix = 'mp3' if job.kind == 'audio' else 'mp4'
+            token = await asyncio.to_thread(publish_download, output, Path(state.settings.download_dir), state.settings.download_ttl_hours, suffix=suffix)
+            link = f"{state.settings.download_base_url}/{token}.{suffix}"
+            await application.bot.send_message(job.chat_id,
+                f"{caption}\nلینک تا {state.settings.download_ttl_hours} ساعت فعال است.",
+                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬇️ دریافت فایل", url=link, style="primary")]]))
+        else:
+            await _safe_progress(application, job, "فایل از سقف ارسال تلگرام بزرگ‌تر است و لینک دانلود روی سرور تنظیم نشده. با پشتیبانی تماس بگیر.")
+            return
+        await _safe_progress(application, job, "✅ فایل آماده و ارسال شد.")
+    except JobCancelled:
+        await _safe_progress(application, job, "دانلود لغو شد.")
+    except Exception:
+        logger.exception("Download failed for job %s", job.id)
+        await _safe_progress(application, job, "دانلود انجام نشد. لینک ممکن است خصوصی، چندبخشی یا در این سرویس موقتاً غیرقابل‌دسترسی باشد؛ دوباره تلاش کن.")
+    finally:
+        cleanup(job.directory)
+        state.active.pop(job.user_id, None)
+        state.queue.task_done()
+
+
 async def worker(application: Application) -> None:
     state: BotState = application.bot_data["state"]
     while True:
@@ -1205,6 +1805,12 @@ async def worker(application: Application) -> None:
         if job is None:
             state.queue.task_done()
             return
+        if isinstance(job, DownloadJob):
+            await _run_download_job(application, state, job)
+            continue
+        if isinstance(job, ContentJob):
+            await _run_content_job(application, state, job)
+            continue
         progress_queue: asyncio.Queue[tuple[str, int] | None] | None = None
         progress_task: asyncio.Task | None = None
         progress_stopped = False
@@ -1226,7 +1832,6 @@ async def worker(application: Application) -> None:
                 job.id,
                 job.user_id,
                 job.api_provider,
-                job.models,
             )
             await state.database.update_job(job.id, "running")
             progress_queue = asyncio.Queue()
@@ -1247,6 +1852,8 @@ async def worker(application: Application) -> None:
                 report_progress,
                 job.mode,
                 job.api_provider,
+                job.models,
+                job.team_glossary,
             )
             subtitle_text = srt.read_text(encoding="utf-8")
             if job.cancel_event.is_set():
@@ -1292,7 +1899,7 @@ async def worker(application: Application) -> None:
                     await stop_progress_updates()
                     refunded = await _refund_job(application, state, job)
                     await state.database.update_job(job.id, "failed", error="Output exceeds Telegram limit and no download host is configured.")
-                    refund_note = "مبلغ پرداختی برگشت داده شد." if refunded else "برای پیگیری برگشت مبلغ /paysupport را بزن."
+                    refund_note = _job_refund_note(job, refunded)
                     await _finish_progress(
                         application, job,
                         f"فایل برای ارسال مستقیم بزرگ است و لینک دانلود تنظیم نشده. {refund_note}",
@@ -1341,7 +1948,7 @@ async def worker(application: Application) -> None:
                     await stop_progress_updates()
                     refunded = await _refund_job(application, state, job)
                     await state.database.update_job(job.id, "failed", error="Telegram rejected output size and no download host is configured.")
-                    refund_note = "مبلغ پرداختی برگشت داده شد." if refunded else "برای پیگیری برگشت مبلغ /paysupport را بزن."
+                    refund_note = _job_refund_note(job, refunded)
                     await _finish_progress(
                         application, job,
                         f"تلگرام ارسال ویدیو را نپذیرفت و لینک دانلود تنظیم نشده. {refund_note}",
@@ -1376,7 +1983,7 @@ async def worker(application: Application) -> None:
             await stop_progress_updates()
             refunded = await _refund_job(application, state, job)
             await state.database.update_job(job.id, "cancelled")
-            refund_note = "مبلغ پرداختی به‌صورت خودکار برگشت داده شد." if refunded else "برای پیگیری برگشت مبلغ، /paysupport را بزن."
+            refund_note = _job_refund_note(job, refunded)
             await _finish_progress(application, job, f"پردازش لغو شد.\n{refund_note}")
         except RateLimitError as exc:
             provider = "سرویس پردازش"
@@ -1402,7 +2009,7 @@ async def worker(application: Application) -> None:
             await _finish_progress(
                 application,
                 job,
-                error_text + ("\nمبلغ پرداختی برگشت داده شد." if refunded else "\nاگر مبلغ کسر شده، برای پیگیری /paysupport را بزن."),
+                error_text + "\n" + _job_refund_note(job, refunded),
             )
         except Exception:
             logger.exception("Job failed for Telegram user %s", job.user_id)
@@ -1412,7 +2019,7 @@ async def worker(application: Application) -> None:
                 await state.database.update_job(job.id, "failed", error="Job failed; see bot logs for details.")
             except Exception:
                 logger.exception("Could not persist failure status for job %s", job.id)
-            refund_note = "مبلغ پرداختی برگشت داده شد." if refunded else "برای پیگیری مبلغ، /paysupport را بزن."
+            refund_note = _job_refund_note(job, refunded)
             await _finish_progress(application, job, f"پردازش انجام نشد.\n{refund_note} لطفاً کمی بعد دوباره تلاش کن.")
         finally:
             await stop_progress_updates()
@@ -1512,10 +2119,16 @@ async def _safe_edit(application: Application, selection: PendingQuality, text: 
         logger.debug("Could not update quality selection", exc_info=True)
 
 
+def _job_refund_note(job: Job, refunded: bool) -> str:
+    if refunded:
+        return "دقیقهٔ مصرف‌شده به بسته بازگشت." if job.package_minutes else "مبلغ پرداختی به کیف پول بازگشت."
+    return "برای پیگیری بازگشت اعتبار، /paysupport را بزن."
+
+
 async def _refund_job(application: Application, state: BotState, job: Job) -> bool:
     result = await state.database.refund_job_wallet(job.id)
     if result and result["refunded"]:
-        logger.info("Returned %s toman to wallet for failed job %s", job.billed_amount_toman, job.id)
+        logger.info("Returned payment for failed job %s", job.id)
         return True
     return False
 
@@ -1534,8 +2147,9 @@ async def _notify_admin_cost(
             chat_id=state.settings.provider_control_user_id,
             text=(
                 f"📊 job {job.id[:8]} کامل شد\nکاربر: {job.user_id} · نوع: {mode}\n"
-                f"فروش: {job.billed_amount_toman:,} تومان برای {job.billable_minutes} دقیقه\n"
-                f"هزینهٔ تخمینی API: {estimate}{model_info}"
+                + (f"پرداخت: بستهٔ دقیقه ({job.package_minutes} دقیقه)\n" if job.package_minutes else
+                 f"فروش: {job.billed_amount_toman:,} تومان برای {job.billable_minutes} دقیقه\n")
+                + f"هزینهٔ تخمینی API: {estimate}{model_info}"
             ),
         )
     except TelegramError:
@@ -1554,6 +2168,8 @@ async def _send_srt(application: Application, job: Job, srt: Path) -> None:
 
 def _receipt_text(job: Job) -> str:
     mode = "زیرنویس فارسی" if job.mode == "subtitle" else "دوبلهٔ فارسی"
+    if job.package_minutes:
+        return f"✅ {mode} آماده شد\nمصرف از بسته: {job.package_minutes} دقیقه"
     rate = job.billed_amount_toman // max(1, job.billable_minutes)
     return f"✅ {mode} آماده شد\nهزینه: {job.billable_minutes} دقیقه × {rate:,} = {job.billed_amount_toman:,} تومان"
 
@@ -1632,13 +2248,21 @@ async def post_init(application: Application) -> None:
     download_dir.mkdir(parents=True, exist_ok=True)
     await asyncio.to_thread(cleanup_expired_downloads, download_dir, settings.download_ttl_hours)
     state = BotState(settings, database)
+    for order in await database.unfinished_content_orders():
+        try:
+            if await database.refund_content_order(order["id"]):
+                await application.bot.send_message(order["chat_id"], "پردازش محتوای تکمیلی به دلیل راه‌اندازی مجدد متوقف شد و هزینه به کیف پول برگشت.")
+        except Exception:
+            logger.exception("Could not refund interrupted content order %s", order["id"])
     for interrupted in await database.interrupted_wallet_jobs():
         try:
             refund = await database.refund_job_wallet(interrupted["job_id"])
             if refund and refund["refunded"]:
                 await application.bot.send_message(
                     chat_id=interrupted["chat_id"],
-                    text=f"پردازش قبلی {interrupted['job_id'][:8]} به‌دلیل راه‌اندازی مجدد کامل نشد؛ هزینه به کیف پول برگشت. موجودی: {refund['balance_toman']:,} تومان.",
+                    text=(f"پردازش قبلی {interrupted['job_id'][:8]} به‌دلیل راه‌اندازی مجدد کامل نشد؛ " +
+                          (f"{refund['package_minutes']} دقیقه به بسته برگشت." if 'package_minutes' in refund else
+                           f"هزینه به کیف پول برگشت. موجودی: {refund['balance_toman']:,} تومان.")),
                 )
         except Exception:
             logger.exception("Could not return wallet balance for interrupted job")
@@ -1671,6 +2295,7 @@ async def post_init(application: Application) -> None:
     from telegram import BotCommand
     await application.bot.set_my_commands([
         BotCommand("start", "شروع و راهنمای ربات"),
+        BotCommand("team", "حساب تیمی و راهنمای آن"),
         BotCommand("pricing", "تعرفه‌ها به‌ازای هر دقیقه"),
         BotCommand("history", "گردش کیف پول"),
         BotCommand("balance", "موجودی کیف پول"),
@@ -1706,6 +2331,14 @@ def main() -> None:
     )
     application.bot_data["settings"] = settings
     application.add_handler(CommandHandler("start", start))
+    application.add_handler(CommandHandler("team", team_command))
+    application.add_handler(CommandHandler("team_create", team_create))
+    application.add_handler(CommandHandler("team_invite", team_invite))
+    application.add_handler(CommandHandler("team_join", team_join))
+    application.add_handler(CommandHandler("team_leave", team_leave))
+    application.add_handler(CommandHandler("team_remove", team_remove))
+    application.add_handler(CommandHandler("team_glossary", team_glossary))
+    application.add_handler(CommandHandler("team_report", team_report))
     application.add_handler(CommandHandler("pricing", pricing))
     application.add_handler(CommandHandler("history", history))
     application.add_handler(CommandHandler("balance", balance))
@@ -1720,7 +2353,11 @@ def main() -> None:
     application.add_handler(CallbackQueryHandler(admin_callback, pattern=r"^admin:"))
     application.add_handler(CallbackQueryHandler(terms_callback, pattern=r"^terms:"))
     application.add_handler(CallbackQueryHandler(menu_callback, pattern=r"^menu:"))
+    application.add_handler(CallbackQueryHandler(content_callback, pattern=r"^content:"))
+    application.add_handler(CallbackQueryHandler(packages_callback, pattern=r"^packs:"))
+    application.add_handler(CallbackQueryHandler(team_join_callback, pattern=r"^team:join:"))
     application.add_handler(CallbackQueryHandler(choose_mode, pattern=r"^mode:"))
+    application.add_handler(CallbackQueryHandler(choose_download, pattern=r"^dl:"))
     application.add_handler(CallbackQueryHandler(choose_quality, pattern=r"^quality:"))
     application.add_handler(CallbackQueryHandler(confirm_order, pattern=r"^confirm:"))
     application.add_handler(CallbackQueryHandler(cancel_order_callback, pattern=r"^order_cancel:"))

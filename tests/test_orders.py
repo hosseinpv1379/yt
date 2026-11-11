@@ -16,7 +16,7 @@ class OrderTests(unittest.IsolatedAsyncioTestCase):
             tts_model='gpt-realtime-2.1-mini', tts_voice='marin')
         db = SimpleNamespace(has_accepted_terms=AsyncMock(return_value=True),
             get_setting=AsyncMock(side_effect=lambda name, default: '5000' if name == 'price_subtitle_toman_per_minute' else default), get_wallet_balance=AsyncMock(return_value=20000),
-            create_wallet_job=AsyncMock(return_value=10000))
+            create_wallet_job=AsyncMock(return_value=10000), team_info=AsyncMock(return_value=None), available_minutes=AsyncMock(return_value=[]))
         state = BotState(settings, db)
         state.pending_quality['token'] = PendingQuality(1, 1, 'https://youtu.be/example', 42, True, 'openai', mode='subtitle', duration_seconds=61)
         state.pending_by_user[1] = 'token'

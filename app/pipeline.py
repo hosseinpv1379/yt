@@ -1020,12 +1020,15 @@ def process_video(
     mode: str = "subtitle",
     provider: str = "openai",
     model_selection: ModelSelection | None = None,
+    team_glossary: str = "",
 ) -> tuple[Path, Path, Path, OpenAICost]:
     job_dir.mkdir(parents=True, exist_ok=True)
     _check_cancel(cancel_event)
     if progress_callback:
         progress_callback("دانلود ویدیو", 0)
     video, context = _download(url, job_dir, settings, selected_height, progress_callback)
+    if team_glossary:
+        context += "\nواژه‌نامهٔ تیم (اصطلاح و معادل، فقط برای ترجمه):\n" + team_glossary[:2000]
     _check_cancel(cancel_event)
 
     if progress_callback:
@@ -1152,18 +1155,20 @@ def cleanup_expired_downloads(directory: Path, ttl_hours: int) -> None:
     for path in directory.iterdir():
         try:
             if (path.is_file()
-                    and re.fullmatch(r"[a-f0-9]{32}\.(?:mp4|srt|vtt|html)", path.name)
+                    and re.fullmatch(r"[a-f0-9]{32}\.(?:mp4|mp3|srt|vtt|html)", path.name)
                     and path.stat().st_mtime < cutoff):
                 path.unlink(missing_ok=True)
         except OSError:
             logger.warning("Could not remove expired download %s", path.name)
 
 
-def publish_download(video: Path, directory: Path, ttl_hours: int) -> str:
+def publish_download(video: Path, directory: Path, ttl_hours: int, *, suffix: str = "mp4") -> str:
     directory.mkdir(parents=True, exist_ok=True)
     cleanup_expired_downloads(directory, ttl_hours)
     token = uuid.uuid4().hex
-    destination = directory / f"{token}.mp4"
+    if suffix not in {"mp4", "mp3"}:
+        raise ValueError("Unsupported download format")
+    destination = directory / f"{token}.{suffix}"
     temporary = directory / f".{token}.tmp"
     shutil.copyfile(video, temporary)
     os.chmod(temporary, 0o644)

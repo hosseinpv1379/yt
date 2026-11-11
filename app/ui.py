@@ -11,17 +11,20 @@ def home_keyboard() -> InlineKeyboardMarkup:
         [button('🎬 سفارش جدید', 'menu:new', style='primary')],
         [button('👛 کیف پول', 'wallet:balance'), button('💎 تعرفه‌ها', 'menu:pricing')],
         [button('📦 سفارش من', 'menu:status'), button('📒 گردش حساب', 'menu:history')],
-        [button('💬 پشتیبانی', 'menu:support'), button('📖 راهنما و شرایط', 'menu:help')],
+        [button('📝 خروجی‌های تکمیلی و ویرایش', 'content:list', style='primary')],
+        [button('🎟 بسته‌های دقیقه', 'packs:list')],
+        [button('👥 تیم', 'menu:team'), button('💬 پشتیبانی', 'menu:support')],
+        [button('📖 راهنما و شرایط', 'menu:help')],
     ])
 
 
 def home_text(balance: int) -> str:
     return (
         '🎬 <b>ویدیو فارسی</b>\n'
-        'زیرنویس و دوبلهٔ فارسی برای ویدیوهای یوتیوب\n\n'
-        '۱  لینک ویدیو را بفرست\n'
-        '۲  خروجی و کیفیت را انتخاب کن\n'
-        '۳  هزینه را ببین و سفارش را تأیید کن\n\n'
+        'زیرنویس و دوبلهٔ یوتیوب · دانلود رسانه از شبکه‌های اجتماعی\n\n'
+        '۱  لینک ویدیو یا آهنگ را بفرست\n'
+        '۲  نوع خروجی را انتخاب کن\n'
+        '۳  سفارش پردازش را تأیید کن یا دانلود را شروع کن\n\n'
         f'👛 موجودی شما: <b>{balance:,} تومان</b>\n'
         'برای شروع، لینک را همین‌جا بفرست یا از منوی زیر استفاده کن.'
     )
@@ -44,9 +47,12 @@ def quality_keyboard(token: str, heights: list[int]) -> InlineKeyboardMarkup:
     ])
 
 
-def confirmation_keyboard(token: str) -> InlineKeyboardMarkup:
+def confirmation_keyboard(token: str, package_id: str | None = None) -> InlineKeyboardMarkup:
+    purchase = [button('✓ پرداخت از کیف پول', f'confirm:{token}', style='success')]
+    if package_id:
+        purchase.append(button('🎟 استفاده از بسته', f'confirm:{token}:{package_id}', style='primary'))
     return InlineKeyboardMarkup([
-        [button('✓ تأیید و شروع پردازش', f'confirm:{token}', style='success')],
+        purchase,
         [button('‹ تغییر خروجی', f'order_back:{token}'),
          button('✕ لغو سفارش', f'order_cancel:{token}', style='danger')],
     ])

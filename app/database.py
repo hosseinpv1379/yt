@@ -1,6 +1,6 @@
 """PostgreSQL persistence for users, wallet ledger, transfer requests, jobs, and downloads."""
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 import uuid
 
 from sqlalchemy import BigInteger, CheckConstraint, DateTime, ForeignKey, Index, Numeric, String, Text, func, select, text
@@ -64,6 +64,56 @@ class JobRecord(Base):
     payment_charge_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
     billed_amount_toman: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     wallet_refunded: Mapped[bool] = mapped_column(nullable=False, default=False, server_default="false")
+    package_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    package_minutes: Mapped[int | None] = mapped_column(nullable=True)
+
+
+class MinutePackage(Base):
+    __tablename__ = "minute_packages"
+    id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.telegram_id"), nullable=False)
+    mode: Mapped[str] = mapped_column(String(12), nullable=False)
+    remaining_minutes: Mapped[int] = mapped_column(nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    price_toman: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
+
+
+class Team(Base):
+    __tablename__ = "teams"
+    id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    owner_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.telegram_id"), unique=True, nullable=False)
+    name: Mapped[str] = mapped_column(String(120), nullable=False)
+    glossary: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
+
+
+class TeamMember(Base):
+    __tablename__ = "team_members"
+    user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.telegram_id"), primary_key=True)
+    team_id: Mapped[str] = mapped_column(String(32), ForeignKey("teams.id"), nullable=False)
+    joined_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
+
+
+class TeamInvite(Base):
+    __tablename__ = "team_invites"
+    token: Mapped[str] = mapped_column(String(32), primary_key=True)
+    team_id: Mapped[str] = mapped_column(String(32), ForeignKey("teams.id"), nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class ContentOrder(Base):
+    __tablename__ = "content_orders"
+    id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.telegram_id"), nullable=False)
+    job_id: Mapped[str] = mapped_column(String(32), ForeignKey("jobs.id"), nullable=False)
+    chat_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    kind: Mapped[str] = mapped_column(String(16), nullable=False)
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="queued")
+    amount_toman: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    output_text: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
 
 
 class DownloadRecord(Base):
@@ -199,6 +249,8 @@ class Database:
             await connection.execute(text(
                 "ALTER TABLE jobs ADD COLUMN IF NOT EXISTS wallet_refunded BOOLEAN NOT NULL DEFAULT FALSE"
             ))
+            await connection.execute(text("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS package_id VARCHAR(32)"))
+            await connection.execute(text("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS package_minutes INTEGER"))
             # Move installations using the former bundled default prices to the new rates.
             # Custom rates configured by the admin are left untouched.
             await connection.execute(text(
@@ -503,6 +555,228 @@ class Database:
             ))
             return user.wallet_balance_toman
 
+    async def purchase_minutes(self, user_id: int, mode: str, minutes: int, price: int, days: int) -> str:
+        if mode not in {"subtitle", "dub"} or not 1 <= minutes <= 10000 or not 1 <= price <= 1_000_000_000 or not 1 <= days <= 365:
+            return "invalid"
+        async with self.sessions.begin() as session:
+            user = await session.scalar(select(User).where(User.telegram_id == user_id).with_for_update())
+            if not user or user.wallet_balance_toman < price:
+                return "balance"
+            user.wallet_balance_toman -= price
+            package_id = uuid.uuid4().hex
+            session.add(MinutePackage(id=package_id, user_id=user_id, mode=mode, remaining_minutes=minutes,
+                                      expires_at=datetime.now(UTC) + timedelta(days=days), price_toman=price))
+            session.add(WalletTransaction(id=uuid.uuid4().hex, user_id=user_id, amount_toman=-price,
+                entry_type="job_charge", memo=f"خرید بسته {minutes} دقیقه‌ای {mode} ({package_id})"))
+            return "purchased"
+
+    async def available_minutes(self, user_id: int) -> list[dict]:
+        async with self.sessions() as session:
+            packages = (await session.scalars(select(MinutePackage).where(MinutePackage.user_id == user_id,
+                MinutePackage.remaining_minutes > 0, MinutePackage.expires_at > datetime.now(UTC))
+                .order_by(MinutePackage.expires_at))).all()
+            return [{"id": p.id, "mode": p.mode, "minutes": p.remaining_minutes, "expires_at": p.expires_at} for p in packages]
+
+    async def create_package_job(self, job_id: str, user_id: int, chat_id: int, url: str,
+                                 selected_height: int | None, mode: str, api_provider: str,
+                                 billable_minutes: int, package_id: str) -> int | None:
+        if billable_minutes < 1:
+            return None
+        async with self.sessions.begin() as session:
+            user = await session.scalar(select(User).where(User.telegram_id == user_id).with_for_update())
+            package = await session.scalar(select(MinutePackage).where(MinutePackage.id == package_id,
+                MinutePackage.user_id == user_id).with_for_update())
+            if not user or not package or package.mode != mode or package.expires_at <= datetime.now(UTC) or package.remaining_minutes < billable_minutes:
+                return None
+            package.remaining_minutes -= billable_minutes
+            session.add(JobRecord(id=job_id, telegram_user_id=user_id, chat_id=chat_id,
+                source_url=url, mode=mode, api_provider=api_provider, selected_height=selected_height,
+                status="queued", billable_minutes=billable_minutes, billed_amount_toman=0,
+                package_id=package.id, package_minutes=billable_minutes))
+            return package.remaining_minutes
+
+    async def create_team(self, owner_id: int, name: str) -> str | None:
+        async with self.sessions.begin() as session:
+            user = await session.scalar(select(User).where(User.telegram_id == owner_id).with_for_update())
+            if not user or await session.get(TeamMember, owner_id):
+                return None
+            team_id = uuid.uuid4().hex
+            session.add(Team(id=team_id, owner_id=owner_id, name=name, glossary=""))
+            session.add(TeamMember(user_id=owner_id, team_id=team_id))
+            return team_id
+
+    async def team_info(self, user_id: int) -> dict | None:
+        async with self.sessions() as session:
+            team = await session.scalar(select(Team).join(TeamMember, TeamMember.team_id == Team.id)
+                                        .where(TeamMember.user_id == user_id))
+            if not team:
+                return None
+            count = await session.scalar(select(func.count()).select_from(TeamMember).where(TeamMember.team_id == team.id))
+            return {"id": team.id, "owner_id": team.owner_id, "name": team.name,
+                    "glossary": team.glossary, "members": int(count or 0)}
+
+    async def create_team_invite(self, owner_id: int) -> str | None:
+        async with self.sessions.begin() as session:
+            team = await session.scalar(select(Team).where(Team.owner_id == owner_id).with_for_update())
+            if not team:
+                return None
+            token = uuid.uuid4().hex
+            session.add(TeamInvite(token=token, team_id=team.id, expires_at=datetime.now(UTC) + timedelta(days=2)))
+            return token
+
+    async def preview_team_invite(self, token: str) -> dict | None:
+        async with self.sessions() as session:
+            row = (await session.execute(select(Team, TeamInvite).join(TeamInvite, TeamInvite.team_id == Team.id)
+                .where(TeamInvite.token == token, TeamInvite.used_at.is_(None),
+                       TeamInvite.expires_at > datetime.now(UTC)))).first()
+            return {"name": row[0].name, "owner_id": row[0].owner_id} if row else None
+
+    async def remove_team_member(self, owner_id: int, member_id: int) -> bool:
+        async with self.sessions.begin() as session:
+            team = await session.scalar(select(Team).where(Team.owner_id == owner_id).with_for_update())
+            if not team or member_id == owner_id:
+                return False
+            member = await session.scalar(select(TeamMember).where(TeamMember.team_id == team.id,
+                TeamMember.user_id == member_id).with_for_update())
+            if not member:
+                return False
+            await session.delete(member)
+            return True
+
+    async def join_team(self, user_id: int, token: str) -> str:
+        async with self.sessions.begin() as session:
+            user = await session.scalar(select(User).where(User.telegram_id == user_id).with_for_update())
+            invitation = await session.scalar(select(TeamInvite).where(TeamInvite.token == token).with_for_update())
+            if not user or not invitation or invitation.used_at or invitation.expires_at <= datetime.now(UTC):
+                return "invalid"
+            if await session.get(TeamMember, user_id):
+                return "member"
+            team = await session.scalar(select(Team).where(Team.id == invitation.team_id).with_for_update())
+            count = await session.scalar(select(func.count()).select_from(TeamMember).where(TeamMember.team_id == team.id))
+            if (count or 0) >= 20:
+                return "full"
+            session.add(TeamMember(user_id=user_id, team_id=team.id))
+            invitation.used_at = datetime.now(UTC)
+            return "joined"
+
+    async def leave_team(self, user_id: int) -> str:
+        async with self.sessions.begin() as session:
+            member = await session.scalar(select(TeamMember).where(TeamMember.user_id == user_id).with_for_update())
+            if not member:
+                return "missing"
+            team = await session.get(Team, member.team_id)
+            if team.owner_id == user_id:
+                return "owner"
+            await session.delete(member)
+            return "left"
+
+    async def set_team_glossary(self, owner_id: int, glossary: str) -> bool:
+        async with self.sessions.begin() as session:
+            team = await session.scalar(select(Team).where(Team.owner_id == owner_id).with_for_update())
+            if not team:
+                return False
+            team.glossary = glossary
+            return True
+
+    async def team_report(self, owner_id: int) -> list[dict] | None:
+        async with self.sessions() as session:
+            team = await session.scalar(select(Team).where(Team.owner_id == owner_id))
+            if not team:
+                return None
+            rows = (await session.execute(select(TeamMember.user_id,
+                func.count(JobRecord.id), func.coalesce(func.sum(JobRecord.billable_minutes), 0))
+                .outerjoin(JobRecord, (JobRecord.telegram_user_id == TeamMember.user_id) & (JobRecord.status == "completed") & (JobRecord.created_at >= TeamMember.joined_at))
+                .where(TeamMember.team_id == team.id).group_by(TeamMember.user_id))).all()
+            return [{"user_id": row[0], "jobs": int(row[1]), "minutes": int(row[2])} for row in rows]
+
+    async def recent_completed_jobs(self, user_id: int, limit: int = 8) -> list[dict]:
+        async with self.sessions() as session:
+            jobs = (await session.scalars(select(JobRecord).where(
+                JobRecord.telegram_user_id == user_id, JobRecord.status == "completed",
+                JobRecord.subtitle_srt.is_not(None),
+            ).order_by(JobRecord.created_at.desc()).limit(limit))).all()
+            return [{"id": job.id, "mode": job.mode, "created_at": job.created_at,
+                     "minutes": job.billable_minutes} for job in jobs]
+
+    async def owned_subtitle(self, job_id: str, user_id: int) -> str | None:
+        async with self.sessions() as session:
+            return await session.scalar(select(JobRecord.subtitle_srt).where(
+                JobRecord.id == job_id, JobRecord.telegram_user_id == user_id,
+                JobRecord.status == "completed"))
+
+    async def replace_subtitle(self, job_id: str, user_id: int, old: str, new: str) -> bool:
+        async with self.sessions.begin() as session:
+            job = await session.scalar(select(JobRecord).where(
+                JobRecord.id == job_id, JobRecord.telegram_user_id == user_id,
+                JobRecord.status == "completed").with_for_update())
+            if not job or job.subtitle_srt != old:
+                return False
+            job.subtitle_srt = new
+            return True
+
+    async def content_results(self, user_id: int, job_id: str) -> list[dict]:
+        async with self.sessions() as session:
+            rows = (await session.scalars(select(ContentOrder).where(ContentOrder.user_id == user_id,
+                ContentOrder.job_id == job_id, ContentOrder.status == "completed",
+                ContentOrder.output_text.is_not(None)).order_by(ContentOrder.created_at.desc()).limit(5))).all()
+            return [{"id": row.id, "kind": row.kind, "created_at": row.created_at} for row in rows]
+
+    async def owned_content_result(self, user_id: int, order_id: str) -> dict | None:
+        async with self.sessions() as session:
+            row = await session.scalar(select(ContentOrder).where(ContentOrder.id == order_id,
+                ContentOrder.user_id == user_id, ContentOrder.status == "completed"))
+            return {"kind": row.kind, "text": row.output_text} if row and row.output_text else None
+
+    async def create_content_order(self, order_id: str, user_id: int, job_id: str,
+                                   chat_id: int, kind: str, amount: int) -> str:
+        if amount <= 0 or kind not in {"summary", "social"}:
+            return "unavailable"
+        async with self.sessions.begin() as session:
+            user = await session.scalar(select(User).where(User.telegram_id == user_id).with_for_update())
+            job = await session.scalar(select(JobRecord).where(JobRecord.id == job_id,
+                JobRecord.telegram_user_id == user_id, JobRecord.status == "completed",
+                JobRecord.subtitle_srt.is_not(None)))
+            if not job or not user:
+                return "missing"
+            if user.wallet_balance_toman < amount:
+                return "balance"
+            user.wallet_balance_toman -= amount
+            session.add(ContentOrder(id=order_id, user_id=user_id, job_id=job_id, chat_id=chat_id,
+                                     kind=kind, amount_toman=amount, status="queued"))
+            session.add(WalletTransaction(id=uuid.uuid4().hex, user_id=user_id,
+                amount_toman=-amount, entry_type="job_charge", job_id=job_id,
+                memo=f"سفارش محتوای تکمیلی {order_id}"))
+            return "created"
+
+    async def finish_content_order(self, order_id: str, output: str) -> bool:
+        async with self.sessions.begin() as session:
+            order = await session.scalar(select(ContentOrder).where(ContentOrder.id == order_id).with_for_update())
+            if not order or order.status != "queued":
+                return False
+            order.output_text = output
+            order.status = "completed"
+            return True
+
+    async def refund_content_order(self, order_id: str) -> bool:
+        async with self.sessions.begin() as session:
+            order = await session.scalar(select(ContentOrder).where(ContentOrder.id == order_id).with_for_update())
+            if not order or order.status != "queued":
+                return False
+            user = await session.scalar(select(User).where(User.telegram_id == order.user_id).with_for_update())
+            if not user:
+                return False
+            user.wallet_balance_toman += order.amount_toman
+            order.status = "refunded"
+            session.add(WalletTransaction(id=uuid.uuid4().hex, user_id=order.user_id,
+                amount_toman=order.amount_toman, entry_type="job_refund", job_id=order.job_id,
+                memo=f"بازگشت هزینهٔ محتوای تکمیلی {order.id}"))
+            return True
+
+    async def unfinished_content_orders(self) -> list[dict]:
+        async with self.sessions() as session:
+            orders = (await session.scalars(select(ContentOrder).where(ContentOrder.status == "queued"))).all()
+            return [{"id": order.id, "chat_id": order.chat_id} for order in orders]
+
     async def create_wallet_job(
         self, job_id: str, user_id: int, chat_id: int, url: str,
         selected_height: int | None, mode: str, api_provider: str,
@@ -531,7 +805,21 @@ class Database:
     async def refund_job_wallet(self, job_id: str) -> dict | None:
         async with self.sessions.begin() as session:
             job = await session.scalar(select(JobRecord).where(JobRecord.id == job_id).with_for_update())
-            if not job or not job.billed_amount_toman or job.billed_amount_toman <= 0:
+            if not job:
+                return None
+            if job.wallet_refunded:
+                return {"refunded": False}
+            if job.package_id and job.package_minutes:
+                package = await session.scalar(select(MinutePackage).where(MinutePackage.id == job.package_id,
+                    MinutePackage.user_id == job.telegram_user_id).with_for_update())
+                if not package:
+                    return None
+                package.remaining_minutes += job.package_minutes
+                if package.expires_at <= datetime.now(UTC):
+                    package.expires_at = datetime.now(UTC) + timedelta(days=1)
+                job.wallet_refunded = True
+                return {"refunded": True, "package_minutes": job.package_minutes}
+            if not job.billed_amount_toman or job.billed_amount_toman <= 0:
                 return None
             user = await session.scalar(
                 select(User).where(User.telegram_id == job.telegram_user_id).with_for_update()
@@ -554,7 +842,7 @@ class Database:
             rows = (await session.execute(
                 select(JobRecord.id, JobRecord.telegram_user_id, JobRecord.chat_id)
                 .where(JobRecord.status == "interrupted")
-                .where(JobRecord.billed_amount_toman.is_not(None), JobRecord.billed_amount_toman > 0)
+                .where((JobRecord.billed_amount_toman > 0) | (JobRecord.package_minutes > 0))
                 .where(JobRecord.wallet_refunded.is_(False))
             )).all()
             return [{"job_id": r[0], "user_id": r[1], "chat_id": r[2]} for r in rows]

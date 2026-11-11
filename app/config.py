@@ -27,6 +27,7 @@ class Settings:
     max_file_bytes: int
     work_dir: str
     youtube_cookies_file: str
+    instagram_cookies_file: str
     ytdlp_pot_base_url: str
     download_dir: str
     download_base_url: str
@@ -102,6 +103,7 @@ def load_settings() -> Settings:
         max_file_bytes=max(1_000_000, int(os.getenv("MAX_FILE_BYTES", "1000000000"))),
         work_dir=os.getenv("WORK_DIR", "/data"),
         youtube_cookies_file=os.getenv("YOUTUBE_COOKIES_FILE", "").strip(),
+        instagram_cookies_file=os.getenv("INSTAGRAM_COOKIES_FILE", "").strip(),
         ytdlp_pot_base_url=os.getenv("YTDLP_POT_BASE_URL", "http://pot-provider:4416").strip(),
         download_dir=os.getenv("DOWNLOAD_DIR", "/downloads"),
         download_base_url=os.getenv("DOWNLOAD_BASE_URL", "").strip().rstrip("/"),

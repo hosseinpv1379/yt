@@ -78,3 +78,39 @@ class ModelSettingsTests(unittest.IsolatedAsyncioTestCase):
             self.assertIs(dub.call_args.args[3], or_client)
             self.assertIs(dub.call_args.args[-1], oa_client)
             self.assertEqual(dub.call_args.args[5], 'Kore')
+
+class CostDisplayTests(unittest.TestCase):
+    def test_dub_prices_distinguish_generated_audio_and_unknown_openai_rate(self):
+        self.assertIn('$0.009 / دقیقه صدای خروجی', catalog.BY_CODE['d2'].price)
+        self.assertIn('$0.0135 / دقیقه صدای خروجی', catalog.BY_CODE['d3'].price)
+        self.assertIn('نامشخص', catalog.BY_CODE['d1'].price)
+
+class MinuteEstimateTests(unittest.IsolatedAsyncioTestCase):
+    async def test_summary_has_each_stage_and_both_totals(self):
+        from app.bot import _show_model_settings
+        db = MemoryDB()
+        await db.set_setting('model_choice_stt', 's3')
+        await db.set_setting('model_choice_translation', 't3')
+        await db.set_setting('model_choice_tts', 'd2')
+        state = BotState(settings(), db)
+        query = SimpleNamespace(edit_message_text=AsyncMock())
+        await _show_model_settings(query, state)
+        text = query.edit_message_text.call_args.args[0]
+        self.assertIn('$0.0004800', text)
+        self.assertIn('$0.0001050', text)
+        self.assertIn('$0.0091500', text)
+        self.assertIn('جمع زیرنویس: حدود $0.0005850', text)
+        self.assertIn('جمع دوبله: حدود $0.0097350', text)
+        self.assertIn('۳۰۰ توکن', text)
+        self.assertIn('تلاش مجدد', text)
+
+    async def test_unknown_price_never_yields_fabricated_total(self):
+        from app.bot import _show_model_settings
+        state = BotState(settings(), MemoryDB())
+        query = SimpleNamespace(edit_message_text=AsyncMock())
+        await _show_model_settings(query, state)
+        self.assertIn('جمع دوبله: نامشخص', query.edit_message_text.call_args.args[0])
+
+    def test_scenario_prices(self):
+        self.assertAlmostEqual(catalog.estimate_cents('stt', catalog.StageSelection('openrouter', 'openai/whisper-large-v3-turbo')), 0.06666666666666667)
+        self.assertIsNone(catalog.estimate_cents('tts', catalog.StageSelection('openai', 'gpt-realtime-2.1-mini')))
