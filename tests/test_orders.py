@@ -11,9 +11,11 @@ class OrderTests(unittest.IsolatedAsyncioTestCase):
     async def test_price_is_shown_before_single_charge(self):
         settings = SimpleNamespace(default_api_provider='openai', openai_api_key='key',
             openrouter_api_key='', default_subtitle_price_toman_per_minute=5000,
-            default_dub_price_toman_per_minute=10000, work_dir='/tmp')
+            default_dub_price_toman_per_minute=10000, work_dir='/tmp',
+            whisper_model='whisper-1', translation_model='gpt-6-luna',
+            tts_model='gpt-realtime-2.1-mini', tts_voice='marin')
         db = SimpleNamespace(has_accepted_terms=AsyncMock(return_value=True),
-            get_setting=AsyncMock(return_value='5000'), get_wallet_balance=AsyncMock(return_value=20000),
+            get_setting=AsyncMock(side_effect=lambda name, default: '5000' if name == 'price_subtitle_toman_per_minute' else default), get_wallet_balance=AsyncMock(return_value=20000),
             create_wallet_job=AsyncMock(return_value=10000))
         state = BotState(settings, db)
         state.pending_quality['token'] = PendingQuality(1, 1, 'https://youtu.be/example', 42, True, 'openai', mode='subtitle', duration_seconds=61)

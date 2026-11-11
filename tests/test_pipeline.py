@@ -3,10 +3,10 @@ import json
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 from pydub import AudioSegment
-from app.pipeline import JobCancelled, _dub_group_slot, _fit_dub_speech, _translate
+from app.pipeline import JobCancelled, _dub_group_slot, _fit_dub_speech, _synthesize_fitting_dub, _translate
 
 
 class PipelineTests(unittest.TestCase):
@@ -33,6 +33,25 @@ class PipelineTests(unittest.TestCase):
         event.set()
         with self.assertRaises(JobCancelled):
             _translate([{'start': 0, 'end': 1, 'text': 'test'}], '', None, 'test', cancel_event=event)
+
+    def test_dub_regenerates_overlong_audio_using_shorter_text(self):
+        generate = Mock(side_effect=[(AudioSegment.silent(duration=2200), 0.1),
+                                     (AudioSegment.silent(duration=900), 0.2)])
+        with patch('app.pipeline._shorten_dub_text', return_value=('متن کوتاه', 0.03)) as shorten:
+            speech, tts_cost, rewrite_cost = _synthesize_fitting_dub(
+                'متن طولانی برای گفتار', 1000, Path('/tmp'), 0, generate, object(), 'model')
+        self.assertEqual(len(speech), 900)
+        self.assertEqual(generate.call_args_list[1].args[0], 'متن کوتاه')
+        self.assertAlmostEqual(tts_cost, 0.3)
+        self.assertEqual(rewrite_cost, 0.03)
+        shorten.assert_called_once()
+
+    def test_dub_stops_after_bounded_retries(self):
+        generate = Mock(return_value=(AudioSegment.silent(duration=3000), None))
+        with patch('app.pipeline._shorten_dub_text', side_effect=[('کوتاه', None), ('کم', None)]):
+            with self.assertRaisesRegex(RuntimeError, 'تلاش مجدد'):
+                _synthesize_fitting_dub('متن خیلی طولانی', 1000, Path('/tmp'), 0, generate, object(), 'model')
+        self.assertEqual(generate.call_count, 3)
 
     def test_dub_rejects_overflow_instead_of_overlapping_or_truncating(self):
         groups = [{'start_ms': 100}, {'start_ms': 200}]

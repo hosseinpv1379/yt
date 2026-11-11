@@ -16,7 +16,7 @@ from telegram.ext import Application, CallbackQueryHandler, CommandHandler, Cont
 from .config import Settings, load_settings
 from .database import Database
 from .openai_limits import ModelLimit, OpenAILimitsUnavailable, get_openai_limits
-from . import ui
+from . import ui, model_catalog
 from .pipeline import (
     JobCancelled,
     OpenAICost,
@@ -54,6 +54,7 @@ class Job:
     cancel_event: asyncio.Event = field(default_factory=asyncio.Event)
     billable_minutes: int = 0
     billed_amount_toman: int = 0
+    models: model_catalog.ModelSelection | None = None
 
 
 @dataclass
@@ -232,18 +233,6 @@ async def choose_quality(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("📜 مطالعه و پذیرش شرایط", callback_data="terms:show")]]),
         )
         return
-    if selection.api_provider == "openrouter" and not state.settings.openrouter_api_key:
-        await query.answer("پردازشگر موقتاً در دسترس نیست.", show_alert=True)
-        state.pending_quality.pop(token, None)
-        state.pending_by_user.pop(user.id, None)
-        await query.edit_message_text("پردازشگر موقتاً در دسترس نیست؛ لطفاً بعداً دوباره تلاش کن.", reply_markup=ui.back_keyboard())
-        return
-    if selection.api_provider == "openai" and not state.settings.openai_api_key:
-        await query.answer("پردازشگر موقتاً در دسترس نیست.", show_alert=True)
-        state.pending_quality.pop(token, None)
-        state.pending_by_user.pop(user.id, None)
-        await query.edit_message_text("پردازشگر موقتاً در دسترس نیست؛ لطفاً بعداً دوباره تلاش کن.", reply_markup=ui.back_keyboard())
-        return
     if user.id in state.active:
         await query.answer("یک کار در حال اجرا داری.", show_alert=True)
         return
@@ -288,6 +277,15 @@ async def confirm_order(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     amount = minutes * rate
     job_id = uuid.uuid4().hex
     try:
+        models = await model_catalog.load_selection(state.database, state.settings, selection.api_provider)
+        required = [models.stt, models.translation] + ([models.tts] if mode == "dub" else [])
+        missing = {item.provider for item in required if not (
+            state.settings.openai_api_key if item.provider == "openai" else state.settings.openrouter_api_key
+        )}
+        if missing:
+            selection.confirming = False
+            await query.answer("پردازشگر سفارش تنظیم نشده است؛ لطفاً با پشتیبانی تماس بگیر.", show_alert=True)
+            return
         await query.answer()
         balance = await state.database.create_wallet_job(
             job_id=job_id, user_id=user.id, chat_id=selection.chat_id,
@@ -320,7 +318,7 @@ async def confirm_order(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         selected_height=selected_height, mode=mode,
         api_provider=selection.api_provider, draft_id=int(job_id[:7], 16) or 1,
         can_use_draft=True, billable_minutes=minutes,
-        billed_amount_toman=amount,
+        billed_amount_toman=amount, models=models,
     )
     state.active[user.id] = job
     await state.queue.put(job)
@@ -693,7 +691,8 @@ async def _show_admin_panel(send, state: BotState, user_id: int) -> None:
          InlineKeyboardButton("➖ کسر از کیف پول", callback_data="admin:wallet:debit")],
         [InlineKeyboardButton("👤 بررسی کاربر", callback_data="admin:wallet:lookup")],
         [InlineKeyboardButton(f"🧾 رسیدهای منتظر بررسی ({stats['pending_deposits']})", callback_data="admin:deposits")],
-        [InlineKeyboardButton("🔌 انتخاب پردازشگر", callback_data="admin:providers")],
+        [InlineKeyboardButton("🤖 مدل‌ها و صدای دوبله", callback_data="admin:models", style="primary")],
+        [InlineKeyboardButton("🔌 پردازشگر پیش‌فرض", callback_data="admin:providers")],
         [InlineKeyboardButton("🔄 به‌روزرسانی پنل", callback_data="admin:refresh")],
     ])
     await send(
@@ -708,6 +707,51 @@ async def _show_admin_panel(send, state: BotState, user_id: int) -> None:
     )
 
 
+async def _show_model_settings(query, state: BotState) -> None:
+    selection = await model_catalog.load_selection(state.database, state.settings, state.api_provider)
+    lines = ["🤖 مدل‌های پردازش", ""]
+    for stage, label in model_catalog.STAGE_LABELS.items():
+        item = getattr(selection, stage)
+        lines.append(f"{label}: {item.model} · {_provider_label(item.provider)}")
+    lines.extend([f"صدای دوبله: {selection.voice}", "", "انتخاب‌ها برای سفارش‌های بعدی اعمال می‌شوند."])
+    await query.edit_message_text("\n".join(lines), reply_markup=InlineKeyboardMarkup([
+        [ui.button("🎧 مدل رونویسی", "admin:model:stt"), ui.button("🌐 مدل ترجمه", "admin:model:translation")],
+        [ui.button("🎙 مدل تولید صدا", "admin:model:tts"), ui.button("🗣 صدای گوینده", "admin:voices")],
+        [ui.button("‹ پنل مدیریت", "admin:refresh")],
+    ]))
+
+
+async def _show_model_options(query, state: BotState, stage: str) -> None:
+    selection = await model_catalog.load_selection(state.database, state.settings, state.api_provider)
+    current = getattr(selection, stage)
+    options = [o for o in model_catalog.OPTIONS if o.stage == stage]
+    lines = [f"🤖 {model_catalog.STAGE_LABELS[stage]}", ""]
+    buttons = []
+    for index, option in enumerate(options, 1):
+        selected = option.model == current.model and option.provider == current.provider
+        lines.append(f"{index}. {'✓ ' if selected else ''}{option.model} · {_provider_label(option.provider)}\n   {option.price}")
+        buttons.append([ui.button(f"{'✓ ' if selected else ''}{index}. {option.model}", f"admin:setmodel:{option.code}", style="success" if selected else None)])
+    lines.extend(["", "قیمت‌ها تقریبی و مربوط به ۱۲ نوامبر ۲۰۲۶ هستند؛ نرخ نهایی را در داشبورد سرویس بررسی کن."])
+    if stage != "stt":
+        lines.append("نرخ‌های توکنی به ازای هر ۱ میلیون توکن هستند؛ هزینهٔ هر ویدیو به مصرف بستگی دارد.")
+    buttons.append([ui.button("‹ مدل‌ها", "admin:models")])
+    await query.edit_message_text("\n".join(lines), reply_markup=InlineKeyboardMarkup(buttons))
+
+
+async def _show_voice_options(query, state: BotState) -> None:
+    selection = await model_catalog.load_selection(state.database, state.settings, state.api_provider)
+    provider = selection.tts.provider
+    voices = model_catalog.VOICES[provider]
+    buttons = [ui.button(f"{'✓ ' if name == selection.voice else ''}{name}",
+                         f"admin:voice:{provider}:{name}", style="success" if name == selection.voice else None)
+               for name in voices]
+    await query.edit_message_text(
+        f"🗣 صدای دوبله · {_provider_label(provider)}\nمدل: {selection.tts.model}\n"
+        "صدا بر اساس مدل انتخاب‌شده نمایش داده می‌شود؛ کیفیت فارسی را با ویدیوی نمونه بررسی کن.",
+        reply_markup=InlineKeyboardMarkup([buttons[i:i + 2] for i in range(0, len(buttons), 2)] + [[ui.button("‹ مدل‌ها", "admin:models")]]),
+    )
+
+
 async def admin_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query, user = update.callback_query, update.effective_user
     if not query or not user:
@@ -717,6 +761,41 @@ async def admin_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         await query.answer("فقط مدیر دسترسی دارد.", show_alert=True)
         return
     action = (query.data or "").split(":")
+    if action == ["admin", "models"]:
+        await query.answer()
+        await _show_model_settings(query, state)
+        return
+    if len(action) == 3 and action[1] == "model" and action[2] in model_catalog.STAGE_LABELS:
+        await query.answer()
+        await _show_model_options(query, state, action[2])
+        return
+    if len(action) == 3 and action[1] == "setmodel":
+        option = model_catalog.BY_CODE.get(action[2])
+        if not option:
+            await query.answer("مدل نامعتبر است.", show_alert=True)
+            return
+        key = state.settings.openai_api_key if option.provider == "openai" else state.settings.openrouter_api_key
+        if not key:
+            await query.answer("کلید این سرویس در سرور تنظیم نشده است.", show_alert=True)
+            return
+        await state.database.set_setting(f"model_choice_{option.stage}", option.code)
+        await query.answer("مدل ذخیره شد.")
+        await _show_model_options(query, state, option.stage)
+        return
+    if action == ["admin", "voices"]:
+        await query.answer()
+        await _show_voice_options(query, state)
+        return
+    if len(action) == 4 and action[1] == "voice":
+        provider, voice = action[2], action[3]
+        current = await model_catalog.load_selection(state.database, state.settings, state.api_provider)
+        if provider != current.tts.provider or voice not in model_catalog.VOICES.get(provider, ()):
+            await query.answer("این صدا برای پردازشگر فعلی معتبر نیست.", show_alert=True)
+            return
+        await state.database.set_setting(f"model_voice_{provider}", voice)
+        await query.answer("صدا ذخیره شد.")
+        await _show_voice_options(query, state)
+        return
     if len(action) == 3 and action[1] == "edit" and action[2] in {"subtitle", "dub"}:
         state.admin_editing[user.id] = action[2]
         await query.answer()
@@ -1147,6 +1226,7 @@ async def worker(application: Application) -> None:
                 job.id,
                 job.user_id,
                 job.api_provider,
+                job.models,
             )
             await state.database.update_job(job.id, "running")
             progress_queue = asyncio.Queue()
@@ -1299,7 +1379,7 @@ async def worker(application: Application) -> None:
             refund_note = "مبلغ پرداختی به‌صورت خودکار برگشت داده شد." if refunded else "برای پیگیری برگشت مبلغ، /paysupport را بزن."
             await _finish_progress(application, job, f"پردازش لغو شد.\n{refund_note}")
         except RateLimitError as exc:
-            provider = _provider_label(job.api_provider)
+            provider = "سرویس پردازش"
             detail = str(exc).replace("\n", " ")[:600]
             logger.warning(
                 "%s returned HTTP 429 for job %s, Telegram user %s: %s",
@@ -1318,16 +1398,7 @@ async def worker(application: Application) -> None:
                 )
             except Exception:
                 logger.exception("Could not persist rate-limit failure for job %s", job.id)
-            if job.api_provider == "openrouter":
-                error_text = (
-                    "OpenRouter یا مدلِ پشت آن خطای 429 برگرداند؛ این پیام به‌تنهایی به معنی پرشدن سقف OpenAI تو نیست. "
-                    "Activity و اعتبار/سقف API key را در OpenRouter بررسی کن؛ جزئیات پاسخ در لاگ bot ثبت شد."
-                )
-            else:
-                error_text = (
-                    "OpenAI خطای 429 برگرداند. جزئیات و زمان بازنشانی را در داشبورد Rate Limits بررسی کن "
-                    "و پس از بازنشانی دوباره تلاش کن."
-                )
+            error_text = "یکی از سرویس‌های پردازش به محدودیت درخواست رسیده است؛ لطفاً کمی بعد دوباره تلاش کن."
             await _finish_progress(
                 application,
                 job,
@@ -1454,13 +1525,17 @@ async def _notify_admin_cost(
 ) -> None:
     estimate = "نامشخص" if costs.total_usd is None else f"${costs.total_usd:.6f}"
     mode = "زیرنویس" if job.mode == "subtitle" else "دوبله"
+    model_info = ""
+    if job.models:
+        model_info = (f"\nرونویسی: {job.models.stt.model} · ترجمه: {job.models.translation.model}"
+                      + (f"\nدوبله: {job.models.tts.model} · صدا: {job.models.voice}" if job.mode == "dub" else ""))
     try:
         await application.bot.send_message(
             chat_id=state.settings.provider_control_user_id,
             text=(
                 f"📊 job {job.id[:8]} کامل شد\nکاربر: {job.user_id} · نوع: {mode}\n"
                 f"فروش: {job.billed_amount_toman:,} تومان برای {job.billable_minutes} دقیقه\n"
-                f"هزینهٔ تخمینی API: {estimate}"
+                f"هزینهٔ تخمینی API: {estimate}{model_info}"
             ),
         )
     except TelegramError:
