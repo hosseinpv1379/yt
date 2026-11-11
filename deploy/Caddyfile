@@ -1,0 +1,4 @@
+# Caddy obtains and renews HTTPS certificates for this hostname automatically.
+{$DOWNLOAD_HOST} {
+    reverse_proxy downloads-nginx:80
+}

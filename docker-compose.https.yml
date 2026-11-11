@@ -1,0 +1,23 @@
+# Optional public HTTPS front end. Start with:
+# docker compose -f docker-compose.yml -f docker-compose.https.yml up -d
+services:
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      DOWNLOAD_HOST: ${DOWNLOAD_HOST:?Set DOWNLOAD_HOST to the public download domain in .env}
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      - downloads-nginx
+    networks:
+      - app
+
+volumes:
+  caddy-data:
+  caddy-config:
