@@ -48,6 +48,25 @@ class DatabaseIntegrationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(sum(outcomes), 1)
         self.assertEqual(await self.db.get_wallet_balance(self.user_id), 490000)
 
+    async def test_image_order_persists_and_refunds_once(self):
+        order_id = uuid.uuid4().hex
+        reference = b"\x89PNG\r\n\x1a\nreference"
+        self.assertEqual(await self.db.create_image_order(order_id, self.user_id, self.user_id,
+            "آسمان را آبی کن", "1:1", "openai", "gpt-image-2", "openai", "gpt-4o-mini",
+            7000, reference, "image/png"), "created")
+        self.assertTrue(await self.db.set_image_prompt(order_id, "Make the sky blue", 0.001))
+        outcomes = await asyncio.gather(self.db.refund_image_order(order_id), self.db.refund_image_order(order_id))
+        self.assertEqual(sum(outcomes), 1)
+        self.assertEqual(await self.db.get_wallet_balance(self.user_id), 500000)
+        self.assertFalse(await self.db.finish_image_order(order_id, reference, "image/png", 0.02))
+        other_id = uuid.uuid4().hex
+        await self.db.create_image_order(other_id, self.user_id, self.user_id, "draw", "1:1",
+            "openrouter", "model", "openai", "gpt-4o-mini", 7000)
+        self.assertTrue(await self.db.finish_image_order(other_id, reference, "image/png", 0.02))
+        self.assertFalse(await self.db.refund_image_order(other_id))
+        self.assertIsNone(await self.db.owned_image(self.user_id + 1, other_id))
+        self.assertEqual((await self.db.owned_image(self.user_id, other_id))["image"], reference)
+
     async def test_team_invite_is_single_use(self):
         team_id = await self.db.create_team(self.user_id, 'Test')
         self.assertIsNotNone(team_id)

@@ -18,18 +18,21 @@ class ImageModel:
 
 
 MODELS = (
+    ImageModel("i7", "openai", "gpt-image-2.6-sunburst", "توکنی؛ نرخ تصویر خروجی $30 / یک میلیون توکن"),
+    ImageModel("i8", "openai", "gpt-image-2.6-flare", "توکنی؛ نرخ تصویر خروجی $30 / یک میلیون توکن"),
     ImageModel("i1", "openai", "gpt-image-2.5-sunburst", "توکنی؛ نرخ تصویر خروجی $30 / یک میلیون توکن"),
     ImageModel("i2", "openai", "gpt-image-2.5-flare", "توکنی؛ نرخ تصویر خروجی $30 / یک میلیون توکن"),
     ImageModel("i3", "openai", "gpt-image-2", "توکنی؛ نرخ تصویر خروجی $15 / یک میلیون توکن"),
     ImageModel("i4", "openrouter", "google/gemini-3.1-flash-image", "توکنی؛ هزینه به خروجی و ارائه‌دهنده بستگی دارد"),
     ImageModel("i5", "openrouter", "google/gemini-3-pro-image", "توکنی؛ هزینه به خروجی و ارائه‌دهنده بستگی دارد"),
     ImageModel("i6", "openrouter", "bytedance-seed/seedream-4.5", "حدود $0.04 برای هر تصویر؛ نرخ ارائه‌دهنده را بررسی کن"),
+    ImageModel("i9", "openrouter", "google/gemini-nano-banana-2.1", "توکنی؛ هزینه به خروجی و ارائه‌دهنده بستگی دارد"),
 )
 BY_CODE = {model.code: model for model in MODELS}
 
 
 async def selected_model(database) -> ImageModel:
-    return BY_CODE.get(await database.get_setting("image_model", "i1"), MODELS[0])
+    return BY_CODE.get(await database.get_setting("image_model", "i7"), BY_CODE["i7"])
 
 
 def optimize_prompt(prompt: str, settings, stage, reference: bytes | None = None,

@@ -1068,6 +1068,10 @@ class Database:
             content_cost = await session.scalar(select(func.sum(ContentOrder.api_cost_usd)).where(ContentOrder.status == "completed"))
             content_unknown = await session.scalar(select(func.count()).select_from(ContentOrder).where(
                 ContentOrder.status == "completed", ContentOrder.api_cost_usd.is_(None))) or 0
+            image_cost = await session.scalar(select(func.sum(ImageOrder.image_cost_usd)))
+            image_optimizer_cost = await session.scalar(select(func.sum(ImageOrder.optimizer_cost_usd)))
+            image_unknown = await session.scalar(select(func.count()).select_from(ImageOrder).where(
+                ImageOrder.status == "completed", ImageOrder.image_cost_usd.is_(None))) or 0
             return {
                 "users": int(users), "jobs": int(jobs), "completed": int(completed),
                 "wallet_total_toman": int(wallet_total), "gross_sales_toman": int(gross),
@@ -1076,6 +1080,9 @@ class Database:
                 "api_cost_usd": float(api_cost) if api_cost is not None else 0.0,
                 "content_cost_usd": float(content_cost) if content_cost is not None else 0.0,
                 "content_cost_unknown": int(content_unknown),
+                "image_cost_usd": float(image_cost or 0),
+                "image_optimizer_cost_usd": float(image_optimizer_cost or 0),
+                "image_cost_unknown": int(image_unknown),
             }
 
     async def close(self) -> None:

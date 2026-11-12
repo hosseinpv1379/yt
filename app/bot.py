@@ -224,6 +224,9 @@ async def receive_link(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         await message.reply_text("یک سفارش باز داری. وضعیت آن را ببین یا درخواست فعلی را لغو کن.",
                                  reply_markup=InlineKeyboardMarkup([[ui.button("📦 وضعیت سفارش", "menu:status", style="primary")]]))
         return
+    if state.image_quotes.get(str(user.id), {}).get("confirming"):
+        await message.reply_text("سفارش تصویر در حال ثبت است؛ چند لحظه صبر کن.")
+        return
 
     if not await state.database.has_accepted_terms(user.id):
         await message.reply_text("برای شروع، شرایط استفاده را بخوان و بپذیر؛ سپس لینک را دوباره بفرست.",
@@ -1001,6 +1004,7 @@ async def _show_admin_panel(send, state: BotState, user_id: int) -> None:
         f"درآمد پردازش خالص: {stats['net_sales_toman']:,} تومان · ماندهٔ کیف پول‌ها: {stats['wallet_total_toman']:,} تومان\n"
         f"هزینهٔ تخمینی API سفارش‌های اصلی: ${stats['api_cost_usd']:.4f}\n"
         f"هزینهٔ ثبت‌شدهٔ محتوای تکمیلی: ${stats['content_cost_usd']:.4f} · موارد نامشخص: {stats['content_cost_unknown']}\n"
+        f"هزینهٔ ثبت‌شدهٔ تصاویر: ${stats.get('image_cost_usd', 0):.4f} · بهینه‌سازی: ${stats.get('image_optimizer_cost_usd', 0):.4f} · تصویر با هزینهٔ نامشخص: {stats.get('image_cost_unknown', 0)}\n"
         f"رسیدهای منتظر بررسی: {stats['pending_deposits']}\n\n"
         "برای شارژ/کسر دستی، دکمه را بزن و شناسهٔ تلگرام و مبلغ تومان را با فاصله بفرست.",
         reply_markup=keyboard,
@@ -2008,6 +2012,7 @@ def _image_quote_keyboard(token: str, aspect: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [ui.button(("✓ " if value == aspect else "") + label, f"image:aspect:{token}:{value}") for label, value in choices],
         [ui.button("✓ تأیید و ساخت تصویر", f"image:buy:{token}", style="success")],
+        [ui.button("✏️ تغییر توضیح", f"image:revise:{token}")],
         [ui.button("✕ لغو", f"image:cancel:{token}", style="danger")],
     ])
 
@@ -2020,6 +2025,9 @@ async def image_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     parts = (query.data or "").split(":")
     action = parts[1] if len(parts) > 1 else ""
     if action == "start":
+        if state.image_quotes.get(str(user.id), {}).get("confirming"):
+            await query.answer("سفارش تصویر در حال ثبت است؛ چند لحظه صبر کن.", show_alert=True)
+            return
         if user.id in state.active or user.id in state.pending_by_user:
             await query.answer("ابتدا سفارش فعال خود را تمام یا لغو کن.", show_alert=True)
             return
@@ -2041,6 +2049,8 @@ async def image_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         await query.message.reply_text("🎨 ساخت یا ویرایش تصویر\n\nبرای ساخت، توضیح تصویر را بفرست. برای ویرایش، ابتدا عکس PNG، JPEG یا WebP تا ۱۰ مگابایت را بفرست و سپس تغییرات را بنویس؛ می‌توانی توضیح را در کپشن عکس هم بنویسی. برای کیفیت اصلی عکس را به‌صورت فایل بفرست.\n\nمتن و عکس پس از تأیید برای سرویس هوش مصنوعی ارسال و در سفارش ذخیره می‌شوند. پیش از کسر هزینه، قیمت و ابعاد را می‌بینی. لغو: /cancel", reply_markup=ui.back_keyboard())
         return
     if action == "history":
+        state.awaiting_image_prompt.discard(user.id)
+        state.image_references.pop(user.id, None)
         try:
             page = max(0, min(10000, int(parts[2]))) if len(parts) == 3 else 0
         except ValueError:
@@ -2061,6 +2071,26 @@ async def image_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         listing = "\n".join(f"• {row['id'][:8]} · {labels.get(row['status'], row['status'])} · {row['amount']:,} تومان" for row in rows[:5])
         await query.edit_message_text(("🖼 سفارش‌های تصویر\n\n" + listing + "\n\nبرای دریافت تصویر آماده دکمهٔ آن را بزن.") if rows else "🖼 در این صفحه سفارشی وجود ندارد.", reply_markup=InlineKeyboardMarkup(buttons))
         return
+    if action == "remix" and len(parts) == 3:
+        if user.id in state.active or user.id in state.pending_by_user or state.image_quotes.get(str(user.id), {}).get("confirming"):
+            await query.answer("ابتدا سفارش فعال را تمام یا لغو کن.", show_alert=True)
+            return
+        if int(await state.database.get_setting("image_edit_price", "0")) <= 0:
+            await query.answer("ویرایش تصویر فعلاً فعال نیست.", show_alert=True)
+            return
+        saved = await state.database.owned_image(user.id, parts[2])
+        if not saved or len(saved["image"]) > 10_000_000:
+            await query.answer("تصویر پیدا نشد یا برای ویرایش بیش از ۱۰ مگابایت است.", show_alert=True)
+            return
+        state.awaiting_support.discard(user.id)
+        state.awaiting_topup.discard(user.id)
+        state.subtitle_editing.pop(user.id, None)
+        state.image_quotes.pop(str(user.id), None)
+        state.image_references[user.id] = (saved["image"], saved["media_type"])
+        state.awaiting_image_prompt.add(user.id)
+        await query.answer()
+        await query.message.reply_text("🖌 توضیح بده چه تغییری در همین تصویر می‌خواهی. هر ویرایش یک سفارش جداست و قبل از تأیید قیمت نمایش داده می‌شود.", reply_markup=ui.back_keyboard())
+        return
     if action == "get" and len(parts) == 3:
         saved = await state.database.owned_image(user.id, parts[2])
         if not saved:
@@ -2077,6 +2107,15 @@ async def image_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         state.image_quotes.pop(str(user.id), None)
         await query.answer()
         await query.edit_message_text("سفارش تصویر لغو شد.", reply_markup=ui.back_keyboard())
+        return
+    if action == "revise":
+        reference = quote.get("reference")
+        state.image_quotes.pop(str(user.id), None)
+        if reference:
+            state.image_references[user.id] = reference
+        state.awaiting_image_prompt.add(user.id)
+        await query.answer()
+        await query.edit_message_text("✏️ توضیح کامل جدیدت را بفرست. عکس مرجع، اگر انتخاب کرده باشی، حفظ می‌شود.", reply_markup=ui.back_keyboard())
         return
     if action == "aspect" and len(parts) == 5 and ":".join(parts[3:]) in {"1:1", "2:3", "3:2"}:
         quote["aspect"] = ":".join(parts[3:])
@@ -2124,7 +2163,9 @@ async def _send_generated_image(application, chat_id: int, data: bytes, media_ty
     ext = {"image/png": "png", "image/jpeg": "jpg", "image/webp": "webp"}.get(media_type, "png")
     document = BytesIO(data)
     document.name = f"image-{order_id[:8]}.{ext}"
-    await application.bot.send_document(chat_id, document, caption=f"🎨 تصویر سفارش {order_id[:8]} · فایل با کیفیت اصلی")
+    await application.bot.send_document(chat_id, document, caption=f"🎨 تصویر سفارش {order_id[:8]} · فایل با کیفیت اصلی",
+        reply_markup=InlineKeyboardMarkup([[ui.button("🖌 ویرایش این تصویر", f"image:remix:{order_id}", style="primary")],
+                                           [ui.button("🖼 تصاویر من", "image:history:0")]]))
 
 
 async def _run_image_job(application: Application, state: BotState, job: ImageJob) -> None:
