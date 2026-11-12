@@ -1,6 +1,10 @@
 .git
 .env
 .venv
+.venv-graphify
+graphify-out
+.agents
+.cursor
 venv
 __pycache__
 *.py[cod]
