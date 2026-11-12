@@ -1,12 +1,14 @@
 import asyncio
 import json
+import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 from pydub import AudioSegment
-from app.pipeline import JobCancelled, _dub_group_slot, _fit_dub_speech, _synthesize_fitting_dub, _translate
+from pydub.generators import Sine
+from app.pipeline import JobCancelled, _dub_group_slot, _fit_dub_speech, _synthesize_fitting_dub, _shorten_dub_text, _translate
 
 
 class PipelineTests(unittest.TestCase):
@@ -45,6 +47,50 @@ class PipelineTests(unittest.TestCase):
         self.assertAlmostEqual(tts_cost, 0.3)
         self.assertEqual(rewrite_cost, 0.03)
         shorten.assert_called_once()
+
+    def test_unchanged_rewrite_does_not_abort_and_retries_speech(self):
+        original = 'این متن کوتاه است'
+        generate = Mock(side_effect=[(AudioSegment.silent(duration=2100), 0.1),
+                                     (AudioSegment.silent(duration=900), 0.2)])
+        response = SimpleNamespace(usage=None, choices=[SimpleNamespace(finish_reason='stop',
+            message=SimpleNamespace(refusal=None, content=json.dumps({'text': original}, ensure_ascii=False)))])
+        client = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=Mock(return_value=response))))
+        speech, tts_cost, rewrite_cost = _synthesize_fitting_dub(original, 1000, Path('/tmp'), 0,
+                                                                  generate, client, 'test')
+        self.assertEqual(len(speech), 900)
+        self.assertEqual(generate.call_args_list[1].args[0], original)
+        self.assertAlmostEqual(tts_cost, 0.3)
+        self.assertIsNone(rewrite_cost)
+
+    def test_longer_rewrite_keeps_original_and_accounts_usage(self):
+        response = SimpleNamespace(usage=SimpleNamespace(prompt_tokens=100, completion_tokens=50, prompt_tokens_details=None),
+            choices=[SimpleNamespace(finish_reason='stop', message=SimpleNamespace(refusal=None,
+                content=json.dumps({'text': 'این متن از متن اولیه خیلی طولانی‌تر است'}, ensure_ascii=False)))])
+        client = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=Mock(return_value=response))))
+        rewritten, cost = _shorten_dub_text(client, 'gpt-4o-mini', 'متن کوتاه', 1000, 2000)
+        self.assertEqual(rewritten, 'متن کوتاه')
+        self.assertAlmostEqual(cost, 0.000045)
+
+    def test_fallback_accelerates_best_complete_audio_without_overlap(self):
+        generate = Mock(side_effect=[(AudioSegment.silent(duration=1700, frame_rate=24000), 0.1),
+                                     (AudioSegment.silent(duration=1800, frame_rate=24000), 0.1),
+                                     (AudioSegment.silent(duration=1750, frame_rate=24000), 0.1)])
+        with tempfile.TemporaryDirectory() as tmp, patch('app.pipeline._shorten_dub_text', return_value=('متن', 0.02)):
+            speech, cost, rewrite = _synthesize_fitting_dub('متن', 1000, Path(tmp), 0, generate, object(), 'test')
+        self.assertLessEqual(len(speech), 1000)
+        self.assertGreater(len(speech), 700)
+        self.assertAlmostEqual(cost, 0.3)
+        self.assertAlmostEqual(rewrite, 0.04)
+
+    def test_fallback_keeps_audible_end_of_speech(self):
+        # A tone at the end represents a final spoken word: it must survive
+        # tempo adjustment rather than being cut off at the slot boundary.
+        speech = Sine(440, sample_rate=24000).to_audio_segment(duration=1500) + Sine(1000, sample_rate=24000).to_audio_segment(duration=200)
+        generate = Mock(return_value=(speech, None))
+        with tempfile.TemporaryDirectory() as tmp, patch('app.pipeline._shorten_dub_text', return_value=('متن', None)):
+            fitted, _, _ = _synthesize_fitting_dub('متن', 1000, Path(tmp), 0, generate, object(), 'test')
+        self.assertLessEqual(len(fitted), 1000)
+        self.assertGreater(fitted[-80:].dBFS, -30)
 
     def test_dub_stops_after_bounded_retries(self):
         generate = Mock(return_value=(AudioSegment.silent(duration=3000), None))

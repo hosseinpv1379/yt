@@ -9,8 +9,11 @@ def button(text: str, action: str, *, style: str | None = None) -> InlineKeyboar
 def home_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [button('🎬 سفارش جدید', 'menu:new', style='primary')],
+        [button('🎨 ساخت تصویر با هوش مصنوعی', 'image:start', style='primary')],
+        [button('🖼 تصاویر من', 'image:history:0')],
+        [button('⏳ وضعیت سفارش فعال', 'menu:status')],
         [button('👛 کیف پول', 'wallet:balance'), button('💎 تعرفه‌ها', 'menu:pricing')],
-        [button('📦 سفارش من', 'menu:status'), button('📒 گردش حساب', 'menu:history')],
+        [button('📦 سفارش‌های من', 'orders:home', style='primary'), button('📒 گردش حساب', 'menu:history')],
         [button('📝 خروجی‌های تکمیلی و ویرایش', 'content:list', style='primary')],
         [button('🎟 بسته‌های دقیقه', 'packs:list')],
         [button('👥 تیم', 'menu:team'), button('💬 پشتیبانی', 'menu:support')],
@@ -53,7 +56,7 @@ def confirmation_keyboard(token: str, package_id: str | None = None) -> InlineKe
         purchase.append(button('🎟 استفاده از بسته', f'confirm:{token}:{package_id}', style='primary'))
     return InlineKeyboardMarkup([
         purchase,
-        [button('‹ تغییر خروجی', f'order_back:{token}'),
+        [button('‹ تغییر کیفیت', f'order_quality_back:{token}'),
          button('✕ لغو سفارش', f'order_cancel:{token}', style='danger')],
     ])
 
@@ -67,3 +70,11 @@ def wallet_keyboard() -> InlineKeyboardMarkup:
 
 def back_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([[button('⌂ منوی اصلی', 'menu:home')]])
+
+
+def job_keyboard(job_id: str, *, cancellable: bool = True) -> InlineKeyboardMarkup:
+    rows = []
+    if cancellable:
+        rows.append([button('✕ لغو این سفارش', f'job_cancel:{job_id}', style='danger')])
+    rows.append([button('📦 سفارش‌های من', 'orders:home'), button('⌂ منوی اصلی', 'menu:home')])
+    return InlineKeyboardMarkup(rows)

@@ -42,6 +42,7 @@ class Settings:
     card_to_card_number: str
     card_to_card_holder: str
     minimum_wallet_topup_toman: int
+    dub_separator_url: str = ""
 
 
 def load_settings() -> Settings:
@@ -118,4 +119,5 @@ def load_settings() -> Settings:
         card_to_card_number="".join(c for c in os.getenv("CARD_TO_CARD_NUMBER", "") if c.isdigit()),
         card_to_card_holder=os.getenv("CARD_TO_CARD_HOLDER", "").strip(),
         minimum_wallet_topup_toman=max(1, int(os.getenv("MINIMUM_WALLET_TOPUP_TOMAN", "50000"))),
+        dub_separator_url=os.getenv("DUB_SEPARATOR_URL", "").strip().rstrip("/"),
     )

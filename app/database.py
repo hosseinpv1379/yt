@@ -3,7 +3,7 @@
 from datetime import UTC, datetime, timedelta
 import uuid
 
-from sqlalchemy import BigInteger, CheckConstraint, DateTime, ForeignKey, Index, Numeric, String, Text, func, select, text
+from sqlalchemy import BigInteger, CheckConstraint, DateTime, ForeignKey, Index, LargeBinary, Numeric, String, Text, func, select, text
 from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 from telegram import User as TelegramUser
@@ -113,6 +113,48 @@ class ContentOrder(Base):
     status: Mapped[str] = mapped_column(String(16), nullable=False, default="queued")
     amount_toman: Mapped[int] = mapped_column(BigInteger, nullable=False)
     output_text: Mapped[str | None] = mapped_column(Text)
+    api_cost_usd: Mapped[float | None] = mapped_column(Numeric(12, 8), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
+
+
+class ImageOrder(Base):
+    __tablename__ = "image_orders"
+    __table_args__ = (Index("ix_image_orders_user_created", "user_id", "created_at"),)
+    id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.telegram_id"), nullable=False)
+    chat_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    original_prompt: Mapped[str] = mapped_column(Text, nullable=False)
+    reference_image: Mapped[bytes | None] = mapped_column(LargeBinary)
+    reference_media_type: Mapped[str | None] = mapped_column(String(32))
+    optimized_prompt: Mapped[str | None] = mapped_column(Text)
+    aspect_ratio: Mapped[str] = mapped_column(String(8), nullable=False)
+    provider: Mapped[str] = mapped_column(String(12), nullable=False)
+    model: Mapped[str] = mapped_column(String(128), nullable=False)
+    optimizer_provider: Mapped[str] = mapped_column(String(12), nullable=False)
+    optimizer_model: Mapped[str] = mapped_column(String(128), nullable=False)
+    amount_toman: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="queued")
+    image_data: Mapped[bytes | None] = mapped_column(LargeBinary)
+    media_type: Mapped[str | None] = mapped_column(String(32))
+    image_cost_usd: Mapped[float | None] = mapped_column(Numeric(12, 8))
+    optimizer_cost_usd: Mapped[float | None] = mapped_column(Numeric(12, 8))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class DownloadTask(Base):
+    __tablename__ = "download_tasks"
+    __table_args__ = (Index("ix_download_tasks_user_created", "user_id", "created_at"),)
+    id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.telegram_id"), nullable=False)
+    chat_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    source_url: Mapped[str] = mapped_column(Text, nullable=False)
+    kind: Mapped[str] = mapped_column(String(12), nullable=False)
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="queued")
+    title: Mapped[str | None] = mapped_column(String(255))
+    token: Mapped[str | None] = mapped_column(String(32))
+    extension: Mapped[str | None] = mapped_column(String(4))
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
 
 
@@ -251,6 +293,9 @@ class Database:
             ))
             await connection.execute(text("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS package_id VARCHAR(32)"))
             await connection.execute(text("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS package_minutes INTEGER"))
+            await connection.execute(text("ALTER TABLE content_orders ADD COLUMN IF NOT EXISTS api_cost_usd NUMERIC(12, 8)"))
+            await connection.execute(text("ALTER TABLE image_orders ADD COLUMN IF NOT EXISTS reference_image BYTEA"))
+            await connection.execute(text("ALTER TABLE image_orders ADD COLUMN IF NOT EXISTS reference_media_type VARCHAR(32)"))
             # Move installations using the former bundled default prices to the new rates.
             # Custom rates configured by the admin are left untouched.
             await connection.execute(text(
@@ -269,6 +314,8 @@ class Database:
                 .where(JobRecord.status.in_(("queued", "running")))
                 .values(status="interrupted", finished_at=now)
             )
+            await session.execute(DownloadTask.__table__.update()
+                .where(DownloadTask.status.in_(("queued", "running"))).values(status="interrupted"))
             # Stop historical Stars invoices; a handler refunds any late successful old payment.
             await session.execute(
                 PaymentOrder.__table__.update()
@@ -689,6 +736,65 @@ class Database:
                 .where(TeamMember.team_id == team.id).group_by(TeamMember.user_id))).all()
             return [{"user_id": row[0], "jobs": int(row[1]), "minutes": int(row[2])} for row in rows]
 
+    async def create_download_task(self, job_id: str, user_id: int, chat_id: int,
+                                   url: str, kind: str) -> None:
+        async with self.sessions.begin() as session:
+            session.add(DownloadTask(id=job_id, user_id=user_id, chat_id=chat_id,
+                                     source_url=url, kind=kind, status="queued"))
+
+    async def update_download_task(self, job_id: str, status: str, *, title: str | None = None,
+                                   token: str | None = None, extension: str | None = None,
+                                   expires_at: datetime | None = None) -> None:
+        values: dict[str, object] = {"status": status}
+        if title is not None:
+            values["title"] = title[:255]
+        if token is not None:
+            values.update(token=token, extension=extension, expires_at=expires_at)
+        async with self.sessions.begin() as session:
+            await session.execute(DownloadTask.__table__.update().where(DownloadTask.id == job_id).values(**values))
+
+    async def list_orders(self, user_id: int, category: str, offset: int = 0, limit: int = 5) -> list[dict]:
+        if category == "processing":
+            model, owner = JobRecord, JobRecord.telegram_user_id
+        elif category == "download":
+            model, owner = DownloadTask, DownloadTask.user_id
+        elif category == "content":
+            model, owner = ContentOrder, ContentOrder.user_id
+        else:
+            return []
+        async with self.sessions() as session:
+            rows = (await session.scalars(select(model).where(owner == user_id)
+                .order_by(model.created_at.desc(), model.id.desc()).offset(max(0, offset)).limit(limit))).all()
+            return [{"id": row.id, "status": row.status, "created_at": row.created_at,
+                     "kind": row.mode if category == "processing" else row.kind} for row in rows]
+
+    async def get_owned_order(self, user_id: int, category: str, order_id: str) -> dict | None:
+        if category == "processing":
+            model, owner = JobRecord, JobRecord.telegram_user_id
+        elif category == "download":
+            model, owner = DownloadTask, DownloadTask.user_id
+        elif category == "content":
+            model, owner = ContentOrder, ContentOrder.user_id
+        else:
+            return None
+        async with self.sessions() as session:
+            row = await session.scalar(select(model).where(model.id == order_id, owner == user_id))
+            if not row:
+                return None
+            result = {"id": row.id, "status": row.status, "created_at": row.created_at,
+                      "kind": row.mode if category == "processing" else row.kind}
+            if category == "processing":
+                result.update(source_url=row.source_url, minutes=row.billable_minutes,
+                              amount=row.billed_amount_toman, package_minutes=row.package_minutes)
+                links = (await session.scalars(select(DownloadRecord).where(DownloadRecord.job_id == order_id)
+                    .order_by(DownloadRecord.created_at.desc()).limit(10))).all()
+                result["links"] = [{"token": link.token, "filename": link.filename,
+                                    "expires_at": link.expires_at} for link in links]
+            elif category == "download":
+                result.update(source_url=row.source_url, title=row.title, token=row.token,
+                              extension=row.extension, expires_at=row.expires_at)
+            return result
+
     async def recent_completed_jobs(self, user_id: int, limit: int = 8) -> list[dict]:
         async with self.sessions() as session:
             jobs = (await session.scalars(select(JobRecord).where(
@@ -748,12 +854,13 @@ class Database:
                 memo=f"سفارش محتوای تکمیلی {order_id}"))
             return "created"
 
-    async def finish_content_order(self, order_id: str, output: str) -> bool:
+    async def finish_content_order(self, order_id: str, output: str, api_cost_usd: float | None = None) -> bool:
         async with self.sessions.begin() as session:
             order = await session.scalar(select(ContentOrder).where(ContentOrder.id == order_id).with_for_update())
             if not order or order.status != "queued":
                 return False
             order.output_text = output
+            order.api_cost_usd = api_cost_usd
             order.status = "completed"
             return True
 
@@ -776,6 +883,79 @@ class Database:
         async with self.sessions() as session:
             orders = (await session.scalars(select(ContentOrder).where(ContentOrder.status == "queued"))).all()
             return [{"id": order.id, "chat_id": order.chat_id} for order in orders]
+
+    async def create_image_order(self, order_id: str, user_id: int, chat_id: int, prompt: str,
+                                 aspect: str, provider: str, model: str, optimizer_provider: str,
+                                 optimizer_model: str, amount: int, reference: bytes | None = None,
+                                 reference_media_type: str | None = None) -> str:
+        if amount <= 0 or aspect not in {"1:1", "2:3", "3:2"} or not 1 <= len(prompt) <= 3000:
+            return "unavailable"
+        if reference is not None and (not reference or len(reference) > 10_000_000 or reference_media_type not in {"image/png", "image/jpeg", "image/webp"}):
+            return "unavailable"
+        async with self.sessions.begin() as session:
+            user = await session.scalar(select(User).where(User.telegram_id == user_id).with_for_update())
+            if not user or user.wallet_balance_toman < amount:
+                return "balance"
+            user.wallet_balance_toman -= amount
+            session.add(ImageOrder(id=order_id, user_id=user_id, chat_id=chat_id, original_prompt=prompt,
+                aspect_ratio=aspect, provider=provider, model=model, optimizer_provider=optimizer_provider,
+                optimizer_model=optimizer_model, amount_toman=amount, status="queued",
+                reference_image=reference, reference_media_type=reference_media_type))
+            session.add(WalletTransaction(id=uuid.uuid4().hex, user_id=user_id, amount_toman=-amount,
+                entry_type="job_charge", memo=f"ساخت تصویر {order_id}"))
+            return "created"
+
+    async def set_image_prompt(self, order_id: str, prompt: str, cost: float | None) -> bool:
+        async with self.sessions.begin() as session:
+            order = await session.scalar(select(ImageOrder).where(ImageOrder.id == order_id).with_for_update())
+            if not order or order.status != "queued":
+                return False
+            order.optimized_prompt, order.optimizer_cost_usd = prompt, cost
+            return True
+
+    async def finish_image_order(self, order_id: str, image: bytes, media_type: str, cost: float | None) -> bool:
+        async with self.sessions.begin() as session:
+            order = await session.scalar(select(ImageOrder).where(ImageOrder.id == order_id).with_for_update())
+            if not order or order.status != "queued":
+                return False
+            order.image_data, order.media_type, order.image_cost_usd = image, media_type, cost
+            order.status, order.finished_at = "completed", datetime.now(UTC)
+            return True
+
+    async def refund_image_order(self, order_id: str) -> bool:
+        async with self.sessions.begin() as session:
+            order = await session.scalar(select(ImageOrder).where(ImageOrder.id == order_id).with_for_update())
+            if not order or order.status != "queued":
+                return False
+            user = await session.scalar(select(User).where(User.telegram_id == order.user_id).with_for_update())
+            if not user:
+                return False
+            user.wallet_balance_toman += order.amount_toman
+            order.status, order.finished_at = "refunded", datetime.now(UTC)
+            session.add(WalletTransaction(id=uuid.uuid4().hex, user_id=order.user_id,
+                amount_toman=order.amount_toman, entry_type="job_refund", memo=f"بازگشت هزینهٔ تصویر {order.id}"))
+            return True
+
+    async def unfinished_image_orders(self) -> list[dict]:
+        async with self.sessions() as session:
+            rows = (await session.scalars(select(ImageOrder).where(ImageOrder.status == "queued"))).all()
+            return [{"id": row.id, "chat_id": row.chat_id} for row in rows]
+
+    async def list_image_orders(self, user_id: int, offset: int = 0, limit: int = 6) -> list[dict]:
+        async with self.sessions() as session:
+            rows = (await session.execute(select(ImageOrder.id, ImageOrder.status, ImageOrder.created_at,
+                                                  ImageOrder.amount_toman).where(ImageOrder.user_id == user_id)
+                    .order_by(ImageOrder.created_at.desc(), ImageOrder.id.desc()).offset(max(0, offset)).limit(limit))).all()
+            return [{"id": row.id, "status": row.status, "created_at": row.created_at,
+                     "amount": row.amount_toman} for row in rows]
+
+    async def owned_image(self, user_id: int, order_id: str) -> dict | None:
+        async with self.sessions() as session:
+            row = await session.scalar(select(ImageOrder).where(ImageOrder.id == order_id,
+                                        ImageOrder.user_id == user_id, ImageOrder.status == "completed"))
+            if not row or not row.image_data:
+                return None
+            return {"image": row.image_data, "media_type": row.media_type, "prompt": row.original_prompt}
 
     async def create_wallet_job(
         self, job_id: str, user_id: int, chat_id: int, url: str,
@@ -885,12 +1065,17 @@ class Database:
             pending_deposits = await session.scalar(select(func.count()).select_from(CardTransferRequest)
                 .where(CardTransferRequest.status == "pending_review")) or 0
             api_cost = await session.scalar(select(func.sum(JobRecord.openai_cost_usd)))
+            content_cost = await session.scalar(select(func.sum(ContentOrder.api_cost_usd)).where(ContentOrder.status == "completed"))
+            content_unknown = await session.scalar(select(func.count()).select_from(ContentOrder).where(
+                ContentOrder.status == "completed", ContentOrder.api_cost_usd.is_(None))) or 0
             return {
                 "users": int(users), "jobs": int(jobs), "completed": int(completed),
                 "wallet_total_toman": int(wallet_total), "gross_sales_toman": int(gross),
                 "refunds_toman": int(refunds), "net_sales_toman": int(gross - refunds),
                 "pending_deposits": int(pending_deposits),
                 "api_cost_usd": float(api_cost) if api_cost is not None else 0.0,
+                "content_cost_usd": float(content_cost) if content_cost is not None else 0.0,
+                "content_cost_unknown": int(content_unknown),
             }
 
     async def close(self) -> None:

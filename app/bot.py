@@ -1,7 +1,9 @@
 import asyncio
 import logging
+import re
 from io import BytesIO
 import uuid
+import httpx
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from html import escape
@@ -17,7 +19,7 @@ from telegram.ext import Application, CallbackQueryHandler, CommandHandler, Cont
 from .config import Settings, load_settings
 from .database import Database
 from .openai_limits import ModelLimit, OpenAILimitsUnavailable, get_openai_limits
-from . import ui, model_catalog
+from . import ui, model_catalog, image_generation
 from .downloads import classify_link, download_media, resolve_spotify_track
 from .content import edit_subtitle_line, generate_content
 from .pipeline import (
@@ -60,6 +62,12 @@ class Job:
     models: model_catalog.ModelSelection | None = None
     team_glossary: str = ""
     package_minutes: int = 0
+    dub_mode: str = "simple"
+    progress_stage: str = "در صف پردازش"
+    progress_percent: int = 0
+    progress_last_edit: float = 0.0
+    progress_last_text: str = ""
+    delivery_started: bool = False
 
 
 @dataclass
@@ -88,6 +96,22 @@ class ContentJob:
 
 
 @dataclass
+class ImageJob:
+    id: str
+    user_id: int
+    chat_id: int
+    message_id: int
+    prompt: str
+    aspect: str
+    model: image_generation.ImageModel
+    optimizer: model_catalog.StageSelection
+    reference: bytes | None = None
+    reference_type: str | None = None
+    cancel_event: asyncio.Event = field(default_factory=asyncio.Event)
+    delivery_started: bool = False
+
+
+@dataclass
 class PendingQuality:
     user_id: int
     chat_id: int
@@ -101,14 +125,17 @@ class PendingQuality:
     quoted_rate: int = 0
     confirming: bool = False
     download_source: str = ""
+    dub_mode: str = "simple"
+    probing: bool = False
+    available_heights: list[int] = field(default_factory=list)
 
 
 class BotState:
     def __init__(self, settings: Settings, database: Database) -> None:
         self.settings = settings
         self.database = database
-        self.queue: asyncio.Queue[Job | DownloadJob | ContentJob | None] = asyncio.Queue()
-        self.active: dict[int, Job | DownloadJob | ContentJob] = {}
+        self.queue: asyncio.Queue[Job | DownloadJob | ContentJob | ImageJob | None] = asyncio.Queue()
+        self.active: dict[int, Job | DownloadJob | ContentJob | ImageJob] = {}
         self.pending_quality: dict[str, PendingQuality] = {}
         self.pending_by_user: dict[int, str] = {}
         self.admin_editing: dict[int, str] = {}
@@ -117,6 +144,9 @@ class BotState:
         self.subtitle_editing: dict[int, str] = {}
         self.content_quotes: dict[str, tuple[int, str, str, int]] = {}
         self.package_quotes: dict[str, tuple[int, str, int, int, int]] = {}
+        self.awaiting_image_prompt: set[int] = set()
+        self.image_quotes: dict[str, dict] = {}
+        self.image_references: dict[int, tuple[bytes, str]] = {}
         self.api_provider = settings.default_api_provider
 
 
@@ -136,6 +166,11 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     state.awaiting_topup.discard(user.id)
     state.awaiting_support.discard(user.id)
     state.subtitle_editing.pop(user.id, None)
+    state.admin_editing.pop(user.id, None)
+    state.awaiting_image_prompt.discard(user.id)
+    state.image_references.pop(user.id, None)
+    if not state.image_quotes.get(str(user.id), {}).get("confirming"):
+        state.image_quotes.pop(str(user.id), None)
     balance = await state.database.get_wallet_balance(user.id)
     await message.reply_text(ui.home_text(balance), parse_mode="HTML", reply_markup=ui.home_keyboard())
 
@@ -154,6 +189,9 @@ async def receive_link(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         return
     if message.chat.type != "private":
         await message.reply_text("برای حفظ حریم خصوصی، لطفاً در گفت‌وگوی خصوصی ربات پیام بده.")
+        return
+    if user.id in state.awaiting_image_prompt:
+        await _receive_image_prompt(update, context)
         return
     url = message.text.strip()
     source_type = classify_link(url)
@@ -183,7 +221,8 @@ async def receive_link(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         await message.reply_text("لینک یوتیوب، اینستاگرام، تیک‌تاک، X، فیسبوک، ویمئو، آپارات، ساندکلاد یا تک‌آهنگ Spotify بفرست.", reply_markup=ui.back_keyboard())
         return
     if user.id in state.active or user.id in state.pending_by_user:
-        await message.reply_text("یک درخواست پردازش باز داری؛ اول آن را کامل کن یا /cancel بزن.")
+        await message.reply_text("یک سفارش باز داری. وضعیت آن را ببین یا درخواست فعلی را لغو کن.",
+                                 reply_markup=InlineKeyboardMarkup([[ui.button("📦 وضعیت سفارش", "menu:status", style="primary")]]))
         return
 
     if not await state.database.has_accepted_terms(user.id):
@@ -248,6 +287,14 @@ async def choose_download(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         selection.confirming = False
         raise
     job_id = uuid.uuid4().hex
+    try:
+        await state.database.create_download_task(job_id, user.id, selection.chat_id, selection.url, kind)
+    except Exception:
+        state.pending_quality.pop(token, None)
+        state.pending_by_user.pop(user.id, None)
+        logger.exception("Could not persist download order %s", job_id)
+        await query.edit_message_text("ثبت درخواست دانلود ممکن نشد؛ لطفاً لینک را دوباره بفرست.")
+        return
     job = DownloadJob(job_id, user.id, selection.chat_id, selection.url, selection.message_id,
                       Path(state.settings.work_dir) / job_id, kind, selection.download_source)
     state.pending_quality.pop(token, None)
@@ -272,29 +319,88 @@ async def choose_mode(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         await query.answer("این انتخاب معتبر نیست.", show_alert=True)
         return
     selection = state.pending_quality.get(token)
-    if not selection or selection.user_id != user.id:
+    if not selection or selection.user_id != user.id or selection.confirming or selection.probing:
         await query.answer("این انتخاب منقضی شده؛ لینک را دوباره بفرست.", show_alert=True)
         return
 
     await query.answer()
     selection.mode = mode
-    await query.edit_message_text(_progress_text("بررسی کیفیت‌های موجود", 0))
+    if mode == "dub":
+        await query.edit_message_text(
+            "🎙 روش دوبله را انتخاب کن:\n\nساده: سریع‌تر؛ صدای اصلی هنگام دوبله کم می‌شود و ممکن است شنیده شود.\n\nهوشمند: تفکیک تقریبی دیالوگ از صدای پس‌زمینه روی سرور؛ کندتر و بدون تضمین حذف کامل دیالوگ.",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("🎧 دوبلهٔ ساده", callback_data=f"dubmode:{token}:simple")],
+                [InlineKeyboardButton("✨ دوبلهٔ هوشمند", callback_data=f"dubmode:{token}:smart")],
+                [InlineKeyboardButton("↩️ بازگشت", callback_data=f"order_back:{token}")],
+            ]),
+        )
+        return
+    await _probe_order(query, context, selection, token)
+
+
+async def choose_dub_mode(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query, user = update.callback_query, update.effective_user
+    if not query or not user:
+        return
+    parts = (query.data or "").split(":")
+    selection = _state(context).pending_quality.get(parts[1]) if len(parts) == 3 else None
+    if not selection or selection.user_id != user.id or selection.mode != "dub" or selection.confirming or selection.probing or parts[2] not in {"simple", "smart"}:
+        await query.answer("این انتخاب دیگر معتبر نیست.", show_alert=True)
+        return
+    if parts[2] == "smart" and not await _separator_available(_state(context).settings):
+        await query.answer("دوبلهٔ هوشمند فعلاً در دسترس نیست؛ دوبلهٔ ساده را انتخاب کن یا با پشتیبانی تماس بگیر.", show_alert=True)
+        return
+    selection.dub_mode = parts[2]
+    await query.answer()
+    await _probe_order(query, context, selection, parts[1])
+
+
+async def _separator_available(settings: Settings) -> bool:
+    if not settings.dub_separator_url:
+        return False
     try:
+        async with httpx.AsyncClient(timeout=3) as client:
+            response = await client.get(settings.dub_separator_url + "/health")
+            return response.status_code == 200
+    except httpx.HTTPError:
+        return False
+
+
+async def _probe_order(query, context, selection: PendingQuality, token: str) -> None:
+    state = _state(context)
+    selection.probing = True
+    try:
+        await query.edit_message_text(_progress_text("بررسی کیفیت‌های موجود", 0))
         heights, duration = await asyncio.to_thread(get_video_details, selection.url, state.settings)
         if duration <= 0:
             raise RuntimeError("مدت ویدیو از یوتیوب دریافت نشد.")
         if duration > state.settings.video_max_minutes * 60:
-            raise RuntimeError(f"حداکثر مدت مجاز {state.settings.video_max_minutes} دقیقه است.")
+            if state.pending_quality.get(token) is not selection:
+                return
+            state.pending_quality.pop(token, None)
+            if state.pending_by_user.get(selection.user_id) == token:
+                state.pending_by_user.pop(selection.user_id, None)
+            await _safe_edit(context.application, selection,
+                             f"مدت ویدیو بیشتر از سقف {state.settings.video_max_minutes} دقیقه است. لینک کوتاه‌تری بفرست.")
+            return
         selection.duration_seconds = int(ceil(duration))
     except Exception:
-        logger.exception("Could not probe YouTube formats for Telegram user %s", user.id)
+        logger.exception("Could not probe YouTube formats for Telegram user %s", selection.user_id)
+        if state.pending_quality.get(token) is not selection:
+            return
         state.pending_quality.pop(token, None)
-        state.pending_by_user.pop(user.id, None)
+        if state.pending_by_user.get(selection.user_id) == token:
+            state.pending_by_user.pop(selection.user_id, None)
         await _safe_edit(application=context.application, selection=selection,
                          text="کیفیت‌های ویدیو دریافت نشد. لطفاً کمی بعد دوباره تلاش کن.")
         return
 
-    mode_label = "زیرنویس فارسی" if mode == "subtitle" else "دوبلهٔ فارسی"
+    if state.pending_quality.get(token) is not selection:
+        return
+    selection.probing = False
+    selection.available_heights = heights
+
+    mode_label = "زیرنویس فارسی" if selection.mode == "subtitle" else ("دوبلهٔ هوشمند" if selection.dub_mode == "smart" else "دوبلهٔ ساده")
     await context.application.bot.edit_message_text(
         f"🎬 سفارش جدید  ·  ۲ از ۳\n\nخروجی: {mode_label}\nکیفیت ویدیو را انتخاب کن:",
         chat_id=selection.chat_id, message_id=selection.message_id,
@@ -314,7 +420,7 @@ async def choose_quality(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         await query.answer("این انتخاب معتبر نیست.", show_alert=True)
         return
     selection = state.pending_quality.get(token)
-    if not selection or selection.user_id != user.id or not selection.mode:
+    if not selection or selection.user_id != user.id or not selection.mode or selection.probing or selection.confirming:
         await query.answer("این انتخاب منقضی شده؛ لینک را دوباره بفرست.", show_alert=True)
         return
     if not await state.database.has_accepted_terms(user.id):
@@ -340,7 +446,7 @@ async def choose_quality(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     selection.selected_height = selected_height
     selection.quoted_rate = rate
     quality = "خودکار" if selected_height is None else f"{selected_height}p"
-    mode_label = "زیرنویس فارسی" if mode == "subtitle" else "دوبلهٔ فارسی"
+    mode_label = "زیرنویس فارسی" if mode == "subtitle" else ("دوبلهٔ هوشمند" if selection.dub_mode == "smart" else "دوبلهٔ ساده")
     balance = await state.database.get_wallet_balance(user.id)
     packages = await state.database.available_minutes(user.id)
     package = next((p for p in packages if p["mode"] == mode and p["minutes"] >= minutes), None)
@@ -372,6 +478,10 @@ async def confirm_order(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         return
     selection.confirming = True
     mode = selection.mode
+    if mode == "dub" and selection.dub_mode == "smart" and not await _separator_available(state.settings):
+        selection.confirming = False
+        await query.answer("دوبلهٔ هوشمند فعلاً در دسترس نیست؛ هزینه‌ای کسر نشد.", show_alert=True)
+        return
     selected_height = selection.selected_height
     rate = selection.quoted_rate
     minutes = max(1, ceil(selection.duration_seconds / 60))
@@ -431,6 +541,7 @@ async def confirm_order(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         can_use_draft=True, billable_minutes=minutes,
         billed_amount_toman=0 if package_id else amount, models=models, team_glossary=team_glossary,
         package_minutes=minutes if package_id else 0,
+        dub_mode=selection.dub_mode,
     )
     state.active[user.id] = job
     await state.queue.put(job)
@@ -439,7 +550,8 @@ async def confirm_order(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
             _progress_text("سفارش در صف پردازش قرار گرفت", 0)
             + f"\nخروجی: {mode_label} | کیفیت: {quality_label}"
             + (f"\nمصرف از بسته: {minutes} دقیقه · باقی‌مانده: {balance} دقیقه" if package_id else
-               f"\nمبلغ: {minutes} × {rate:,} = {amount:,} تومان\nموجودی باقی‌مانده: {balance:,} تومان")
+               f"\nمبلغ: {minutes} × {rate:,} = {amount:,} تومان\nموجودی باقی‌مانده: {balance:,} تومان"),
+            reply_markup=ui.job_keyboard(job.id),
         )
     except TelegramError:
         logger.exception("Could not edit wallet-job status message %s", job_id)
@@ -451,7 +563,7 @@ async def back_to_mode(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         return
     token = (query.data or "").partition(":")[2]
     selection = _state(context).pending_quality.get(token)
-    if not selection or selection.user_id != user.id or selection.confirming:
+    if not selection or selection.user_id != user.id or selection.confirming or selection.probing:
         await query.answer("این سفارش دیگر فعال نیست.", show_alert=True)
         return
     selection.mode = None
@@ -461,6 +573,20 @@ async def back_to_mode(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         "🎬 سفارش جدید  ·  ۱ از ۳\n\nنوع خروجی را انتخاب کن:",
         reply_markup=ui.mode_keyboard(token),
     )
+
+
+async def back_to_quality(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query, user = update.callback_query, update.effective_user
+    if not query or not user:
+        return
+    token = (query.data or "").partition(":")[2]
+    selection = _state(context).pending_quality.get(token)
+    if not selection or selection.user_id != user.id or not selection.mode or selection.probing or selection.confirming:
+        await query.answer("این سفارش دیگر فعال نیست.", show_alert=True)
+        return
+    selection.quoted_rate = 0
+    await query.answer()
+    await query.edit_message_text("🎬 کیفیت ویدیو را انتخاب کن:", reply_markup=ui.quality_keyboard(token, selection.available_heights))
 
 
 async def cancel_order_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -496,11 +622,30 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         state.awaiting_topup.discard(user.id)
         await message.reply_text("درخواست وارد کردن مبلغ لغو شد.", reply_markup=ui.back_keyboard())
         return
+    if user.id in state.awaiting_image_prompt:
+        state.awaiting_image_prompt.discard(user.id)
+        state.image_references.pop(user.id, None)
+        state.image_quotes.pop(str(user.id), None)
+        await message.reply_text("ساخت تصویر لغو شد.", reply_markup=ui.back_keyboard())
+        return
+    image_quote = state.image_quotes.get(str(user.id))
+    if image_quote:
+        if image_quote.get("confirming"):
+            await message.reply_text("در حال ثبت سفارش تصویر هستیم؛ چند لحظه صبر کن.")
+            return
+        state.image_quotes.pop(str(user.id), None)
+        await message.reply_text("انتخاب تصویر لغو شد.", reply_markup=ui.back_keyboard())
+        return
     if state.admin_editing.pop(user.id, None):
         await message.reply_text("تغییر تنظیمات لغو شد.")
         return
-    pending_token = state.pending_by_user.pop(user.id, None)
+    pending_token = state.pending_by_user.get(user.id)
     if pending_token:
+        selection = state.pending_quality.get(pending_token)
+        if selection and selection.confirming:
+            await message.reply_text("در حال ثبت سفارش هستیم؛ چند لحظه صبر کن و سپس وضعیت سفارش را ببین.", reply_markup=ui.back_keyboard())
+            return
+        state.pending_by_user.pop(user.id, None)
         selection = state.pending_quality.pop(pending_token, None)
         if selection:
             await _safe_edit(context.application, selection, "درخواست لغو شد.")
@@ -508,8 +653,11 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         return
     job = state.active.get(user.id)
     if job:
+        if isinstance(job, (Job, ImageJob)) and job.delivery_started:
+            await message.reply_text("خروجی در حال تحویل است و دیگر نمی‌توان این سفارش را لغو کرد.", reply_markup=ui.back_keyboard())
+            return
         job.cancel_event.set()
-        await message.reply_text("درخواست لغو ثبت شد؛ پس از پایان گام فعلی متوقف می‌شود." if isinstance(job, DownloadJob) else "درخواست لغو ثبت شد؛ پس از پایان گام فعلی هزینه به کیف پول برمی‌گردد.")
+        await message.reply_text(_cancel_requested_text(job), reply_markup=ui.back_keyboard())
         return
     pending_deposit = await state.database.get_user_pending_deposit(user.id)
     if pending_deposit and pending_deposit["status"] == "awaiting_proof":
@@ -517,6 +665,34 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await message.reply_text("درخواست شارژ لغو شد؛ اگر انتقال کارت‌به‌کارت انجام داده‌ای با /paysupport پیگیری کن.")
         return
     await message.reply_text("درخواستی برای لغو وجود ندارد.")
+
+
+def _cancel_requested_text(job: Job | DownloadJob | ContentJob | ImageJob) -> str:
+    if isinstance(job, DownloadJob):
+        return "درخواست لغو ثبت شد؛ پس از پایان مرحلهٔ فعلی دانلود متوقف می‌شود."
+    if isinstance(job, Job) and job.package_minutes:
+        return "درخواست لغو ثبت شد؛ پس از توقف، دقیقهٔ مصرف‌شده به بسته برمی‌گردد."
+    return "درخواست لغو ثبت شد؛ پس از توقف، هزینه طبق نتیجهٔ بازپرداخت به کیف پول برمی‌گردد."
+
+
+async def cancel_job_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query, user = update.callback_query, update.effective_user
+    if not query or not user:
+        return
+    job_id = (query.data or "").partition(":")[2]
+    job = _state(context).active.get(user.id)
+    if not job or job.id != job_id:
+        await query.answer("این سفارش دیگر فعال نیست.", show_alert=True)
+        return
+    if isinstance(job, (Job, ImageJob)) and job.delivery_started:
+        await query.answer("خروجی در حال تحویل است و لغو دیگر ممکن نیست.", show_alert=True)
+        return
+    if job.cancel_event.is_set():
+        await query.answer("درخواست لغو قبلاً ثبت شده است.")
+        return
+    job.cancel_event.set()
+    await query.answer("درخواست لغو ثبت شد.")
+    await query.message.reply_text(_cancel_requested_text(job), reply_markup=ui.back_keyboard())
 
 
 async def limits(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -812,6 +988,7 @@ async def _show_admin_panel(send, state: BotState, user_id: int) -> None:
         [InlineKeyboardButton(f"🧾 رسیدهای منتظر بررسی ({stats['pending_deposits']})", callback_data="admin:deposits")],
         [InlineKeyboardButton("🎟 تنظیم بسته‌های دقیقه", callback_data="admin:packages")],
         [InlineKeyboardButton("📝 قیمت محتوای تکمیلی", callback_data="admin:contentprices")],
+        [InlineKeyboardButton("🎨 تنظیم ساخت تصویر", callback_data="admin:images", style="primary")],
         [InlineKeyboardButton("🤖 مدل‌ها و صدای دوبله", callback_data="admin:models", style="primary")],
         [InlineKeyboardButton("🔌 پردازشگر پیش‌فرض", callback_data="admin:providers")],
         [InlineKeyboardButton("🔄 به‌روزرسانی پنل", callback_data="admin:refresh")],
@@ -822,7 +999,9 @@ async def _show_admin_panel(send, state: BotState, user_id: int) -> None:
         f"پردازشگر: {_provider_label(state.api_provider)}\n\n"
         f"کاربران: {stats['users']} · کل کارها: {stats['jobs']} · موفق: {stats['completed']}\n"
         f"درآمد پردازش خالص: {stats['net_sales_toman']:,} تومان · ماندهٔ کیف پول‌ها: {stats['wallet_total_toman']:,} تومان\n"
-        f"هزینهٔ تخمینی API: ${stats['api_cost_usd']:.4f} · رسیدهای منتظر بررسی: {stats['pending_deposits']}\n\n"
+        f"هزینهٔ تخمینی API سفارش‌های اصلی: ${stats['api_cost_usd']:.4f}\n"
+        f"هزینهٔ ثبت‌شدهٔ محتوای تکمیلی: ${stats['content_cost_usd']:.4f} · موارد نامشخص: {stats['content_cost_unknown']}\n"
+        f"رسیدهای منتظر بررسی: {stats['pending_deposits']}\n\n"
         "برای شارژ/کسر دستی، دکمه را بزن و شناسهٔ تلگرام و مبلغ تومان را با فاصله بفرست.",
         reply_markup=keyboard,
     )
@@ -899,6 +1078,36 @@ async def admin_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         await query.answer("فقط مدیر دسترسی دارد.", show_alert=True)
         return
     action = (query.data or "").split(":")
+    if action == ["admin", "images"]:
+        await query.answer()
+        model = await image_generation.selected_model(state.database)
+        price = int(await state.database.get_setting("image_price", "0"))
+        edit_price = int(await state.database.get_setting("image_edit_price", "0"))
+        buttons = [[ui.button(f"{'✓ ' if option == model else ''}{option.model}", f"admin:imagemodel:{option.code}")]
+                   for option in image_generation.MODELS]
+        buttons += [[ui.button("✏️ قیمت ساخت", "admin:imageprice"), ui.button("✏️ قیمت ویرایش", "admin:imageeditprice")], [ui.button("‹ پنل مدیریت", "admin:refresh")]]
+        rates = "\n".join(f"{item.model} · {_provider_label(item.provider)}: {item.price_hint}" for item in image_generation.MODELS)
+        await query.edit_message_text(f"🎨 تنظیم تولید تصویر\n\nمدل: {model.model}\nساخت: {price:,} تومان · ویرایش: {edit_price:,} تومان (صفر = غیرفعال)\n\n{rates}\n\nهزینهٔ بهینه‌سازی و عکس ورودی جداگانه به هزینهٔ API افزوده می‌شود. نرخ‌ها تقریبی‌اند؛ قیمت و دسترسی را بررسی کن.", reply_markup=InlineKeyboardMarkup(buttons))
+        return
+    if len(action) == 3 and action[1] == "imagemodel":
+        option = image_generation.BY_CODE.get(action[2])
+        if not option or not (state.settings.openai_api_key if option.provider == "openai" else state.settings.openrouter_api_key):
+            await query.answer("مدل یا کلید سرویس در دسترس نیست.", show_alert=True)
+            return
+        await state.database.set_setting("image_model", option.code)
+        await query.answer("مدل تصویر ذخیره شد.")
+        await query.edit_message_text(f"✅ مدل تصویر برای سفارش‌های بعدی: {option.model}", reply_markup=InlineKeyboardMarkup([[ui.button("‹ تنظیم تصویر", "admin:images")]]))
+        return
+    if action == ["admin", "imageprice"]:
+        state.admin_editing[user.id] = "image_price"
+        await query.answer()
+        await query.edit_message_text("قیمت فروش هر تصویر را به تومان بفرست؛ صفر سرویس را غیرفعال می‌کند. لغو: /cancel")
+        return
+    if action == ["admin", "imageeditprice"]:
+        state.admin_editing[user.id] = "image_edit_price"
+        await query.answer()
+        await query.edit_message_text("قیمت ویرایش هر تصویر را به تومان بفرست؛ صفر ویرایش را غیرفعال می‌کند. لغو: /cancel")
+        return
     if action == ["admin", "packages"]:
         await query.answer()
         await query.edit_message_text("🎟 تنظیم بسته‌ها\n\nبرای هر نوع، دقیقه، قیمت تومان و روز اعتبار را وارد کن؛ صفر برای غیرفعال‌سازی.",
@@ -1087,12 +1296,16 @@ async def _save_admin_value(update: Update, state: BotState, application: Applic
         return
     try:
         price = int(message.text.strip().replace(",", "").replace("٬", ""))
-        if not (0 if key.startswith("content_") else 1) <= price <= 1_000_000_000:
+        if not (0 if key.startswith("content_") or key in {"image_price", "image_edit_price"} else 1) <= price <= 1_000_000_000:
             raise ValueError
     except ValueError:
         await message.reply_text("یک عدد صحیح تومان بین ۱ تا ۱٬۰۰۰٬۰۰۰٬۰۰۰ بفرست.")
         return
     state.admin_editing.pop(user.id, None)
+    if key in {"image_price", "image_edit_price"}:
+        await state.database.set_setting(key, str(price))
+        await message.reply_text(f"✅ قیمت {'ویرایش' if key == 'image_edit_price' else 'ساخت'} هر تصویر: {price:,} تومان؛ صفر سرویس را غیرفعال می‌کند.")
+        return
     if key in {"content_summary", "content_social"}:
         await state.database.set_setting(f"content_price_{key.removeprefix('content_')}", str(price))
         await message.reply_text(f"✅ قیمت سرویس روی {price:,} تومان تنظیم شد؛ صفر به معنی غیرفعال است.")
@@ -1123,6 +1336,10 @@ async def menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         return
     action = (query.data or "").partition(":")[2]
     await query.answer()
+    _state(context).awaiting_image_prompt.discard(user.id)
+    _state(context).image_references.pop(user.id, None)
+    if not _state(context).image_quotes.get(str(user.id), {}).get("confirming"):
+        _state(context).image_quotes.pop(str(user.id), None)
     if action != "support":
         _state(context).awaiting_support.discard(user.id)
         _state(context).awaiting_topup.discard(user.id)
@@ -1131,6 +1348,13 @@ async def menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     elif action == "new":
         _state(context).awaiting_topup.discard(user.id)
         _state(context).awaiting_support.discard(user.id)
+        state = _state(context)
+        if user.id in state.active or user.id in state.pending_by_user:
+            await query.message.reply_text(
+                "یک سفارش باز داری. ابتدا آن را تکمیل یا لغو کن.",
+                reply_markup=InlineKeyboardMarkup([[ui.button("📦 وضعیت سفارش", "menu:status", style="primary")],
+                                                  [ui.button("⌂ منوی اصلی", "menu:home")]]))
+            return
         await query.message.reply_text(
             "🎬 سفارش جدید\n\nلینک یوتیوب یا رسانهٔ شبکه‌های اجتماعی را همین‌جا بفرست.\n"
             f"حداکثر مدت ویدیو: {_state(context).settings.video_max_minutes} دقیقه.",
@@ -1141,26 +1365,24 @@ async def menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         state = _state(context)
         if user.id in state.active:
             job = state.active[user.id]
-            label = ("دانلود" if isinstance(job, DownloadJob) else "محتوای تکمیلی" if isinstance(job, ContentJob) else
+            label = ("دانلود" if isinstance(job, DownloadJob) else "ساخت تصویر" if isinstance(job, ImageJob) else "محتوای تکمیلی" if isinstance(job, ContentJob) else
                      "زیرنویس" if job.mode == "subtitle" else "دوبله")
             await query.message.reply_text(
                 f"📦 سفارش فعال\n\nنوع: {label}\nشمارهٔ سفارش: {job.id[:8]}\n"
-                "وضعیت دقیق در پیام پیشرفت سفارش نمایش داده می‌شود.",
-                reply_markup=InlineKeyboardMarkup([
-                    [ui.button("✕ درخواست لغو", "menu:canceljob", style="danger")],
-                    [ui.button("⌂ منوی اصلی", "menu:home")],
-                ]))
+                + ((_progress_text(job.progress_stage, job.progress_percent) + "\nدرصد تقریبی مراحل پردازش است.")
+                   if isinstance(job, Job) else "وضعیت در پیام سفارش نمایش داده می‌شود.")
+                + ("\n⏳ درخواست لغو در حال انجام است." if job.cancel_event.is_set() else ""),
+                reply_markup=ui.job_keyboard(job.id, cancellable=not isinstance(job, (Job, ImageJob)) or not job.delivery_started))
         elif user.id in state.pending_by_user:
-            await query.message.reply_text("📦 سفارش هنوز در مرحلهٔ انتخاب است. به پیام انتخاب برگرد یا /cancel را بزن.", reply_markup=ui.back_keyboard())
+            token = state.pending_by_user[user.id]
+            await query.message.reply_text("📦 سفارش هنوز در مرحلهٔ انتخاب است. به پیام انتخاب برگرد یا آن را لغو کن.",
+                reply_markup=InlineKeyboardMarkup([[ui.button("✕ لغو انتخاب", f"order_cancel:{token}", style="danger")],
+                                                  [ui.button("⌂ منوی اصلی", "menu:home")]]))
         else:
             await query.message.reply_text("📦 سفارش فعالی نداری. برای شروع لینک یوتیوب را بفرست.", reply_markup=ui.home_keyboard())
     elif action == "canceljob":
-        job = _state(context).active.get(user.id)
-        if job:
-            job.cancel_event.set()
-            await query.message.reply_text("درخواست لغو ثبت شد؛ پس از پایان گام فعلی متوقف می‌شود." if isinstance(job, DownloadJob) else "درخواست لغو ثبت شد؛ پس از پایان گام فعلی هزینه به کیف پول برمی‌گردد.", reply_markup=ui.back_keyboard())
-        else:
-            await query.message.reply_text("سفارش فعالی برای لغو وجود ندارد.", reply_markup=ui.back_keyboard())
+        await query.message.reply_text("برای لغو، وضعیت سفارش فعلی را باز کن.",
+            reply_markup=InlineKeyboardMarkup([[ui.button("📦 وضعیت سفارش", "menu:status", style="primary")]]))
     elif action == "team":
         await team_command(update, context)
     elif action == "history":
@@ -1187,6 +1409,9 @@ async def receive_deposit_proof(update: Update, context: ContextTypes.DEFAULT_TY
         return
     if message.chat.type != "private":
         await message.reply_text("رسید را فقط در گفت‌وگوی خصوصی ربات بفرست.")
+        return
+    if user.id in _state(context).awaiting_image_prompt:
+        await _receive_image_reference(update, context)
         return
     pending = await _state(context).database.get_user_pending_deposit(user.id)
     if not pending or pending["status"] != "awaiting_proof":
@@ -1380,6 +1605,147 @@ def _format_model_limit(item: ModelLimit) -> str:
     if item.max_tokens_per_minute is not None:
         parts.append(f"TPM: {item.max_tokens_per_minute:,}")
     return " • ".join(parts)
+
+
+ORDER_PAGE_SIZE = 5
+ORDER_CATEGORIES = {"processing": "دوبله و زیرنویس", "download": "دانلود فایل", "content": "محتوای تکمیلی"}
+ORDER_STATUS = {"queued": "در صف", "running": "در حال پردازش", "completed": "تکمیل‌شده",
+                "failed": "ناموفق", "cancelled": "لغوشده", "interrupted": "متوقف‌شده با راه‌اندازی مجدد",
+                "refunded": "ناموفق؛ بازپرداخت‌شده"}
+
+
+def _order_kind(category: str, kind: str) -> str:
+    if category == "processing":
+        return "زیرنویس فارسی" if kind == "subtitle" else "دوبلهٔ فارسی"
+    if category == "download":
+        return "فایل صوتی" if kind == "audio" else "ویدیو"
+    return "خلاصه و جزوه" if kind == "summary" else "بستهٔ تولید محتوا"
+
+
+def _order_active_link(order: dict, category: str, settings, now: datetime) -> tuple[str, datetime, str] | None:
+    """Only expose a published token that belongs to this order and is still live."""
+    if order['status'] != "completed" or not settings.download_base_url:
+        return None
+    directory = Path(settings.download_dir)
+    if category == "processing":
+        candidates = order.get('links', [])
+    elif category == "download":
+        candidates = [{"token": order.get('token'), "filename": order.get('extension'),
+                       "expires_at": order.get('expires_at')}]
+    else:
+        return None
+    for item in candidates:
+        token, filename, expiry = item.get('token'), item.get('filename'), item.get('expires_at')
+        if not isinstance(token, str) or not re.fullmatch(r"[a-f0-9]{32}", token):
+            continue
+        if not isinstance(expiry, datetime) or expiry.tzinfo is None or expiry <= now:
+            continue
+        if category == "processing" and filename == "video.mp4":
+            if (directory / f"{token}.mp4").is_file():
+                if (directory / f"{token}.html").is_file():
+                    return f"{settings.download_base_url}/{token}", expiry, "player"
+                return f"{settings.download_base_url}/{token}.mp4", expiry, "video"
+        elif category == "processing" and filename == "video-fa.mp4":
+            if (directory / f"{token}.mp4").is_file():
+                return f"{settings.download_base_url}/{token}.mp4", expiry, "video"
+        elif category == "download" and filename in {"mp3", "mp4"}:
+            if (directory / f"{token}.{filename}").is_file():
+                return f"{settings.download_base_url}/{token}.{filename}", expiry, "download"
+    return None
+
+
+async def orders_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query, user = update.callback_query, update.effective_user
+    if not query or not user or not query.message or query.message.chat.type != "private":
+        return
+    state = _state(context)
+    parts = (query.data or "").split(":")
+    action = parts[1] if len(parts) > 1 else ""
+    if action == "home":
+        await query.answer()
+        await query.message.reply_text("📦 سفارش‌های من\n\nنوع سفارش را انتخاب کن:", reply_markup=InlineKeyboardMarkup([
+            [ui.button("🎬 زیرنویس و دوبله", "orders:list:processing:0", style="primary")],
+            [ui.button("📥 دانلود فایل", "orders:list:download:0"), ui.button("📝 محتوای تکمیلی", "orders:list:content:0")],
+            [ui.button("🎨 سفارش‌های تصویر", "image:history:0")],
+            [ui.button("⏳ سفارش فعال", "menu:status"), ui.button("⌂ منوی اصلی", "menu:home")],
+        ]))
+        return
+    if action == "list" and len(parts) == 4 and parts[2] in ORDER_CATEGORIES:
+        category = parts[2]
+        try:
+            page = int(parts[3])
+            if not 0 <= page <= 10000:
+                raise ValueError
+        except ValueError:
+            await query.answer("شمارهٔ صفحه معتبر نیست.", show_alert=True)
+            return
+        rows = await state.database.list_orders(user.id, category, page * ORDER_PAGE_SIZE, ORDER_PAGE_SIZE + 1)
+        await query.answer()
+        buttons = []
+        for row in rows[:ORDER_PAGE_SIZE]:
+            label = f"{_order_kind(category, row['kind'])} · {ORDER_STATUS.get(row['status'], 'نامشخص')} · {row['id'][:8]}"
+            buttons.append([ui.button(label, f"orders:detail:{category}:{row['id']}:{page}")])
+        navigation = []
+        if page:
+            navigation.append(ui.button("‹ قبلی", f"orders:list:{category}:{page - 1}"))
+        if len(rows) > ORDER_PAGE_SIZE:
+            navigation.append(ui.button("بعدی ›", f"orders:list:{category}:{page + 1}"))
+        if navigation:
+            buttons.append(navigation)
+        buttons.append([ui.button("‹ دسته‌ها", "orders:home")])
+        text = f"📦 {ORDER_CATEGORIES[category]} · صفحهٔ {page + 1}\n\n" + ("سفارشی پیدا نشد." if not rows else "برای مشاهدهٔ جزئیات، یک سفارش را انتخاب کن.")
+        await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(buttons))
+        return
+    if action == "detail" and len(parts) == 5 and parts[2] in ORDER_CATEGORIES:
+        category, order_id = parts[2], parts[3]
+        try:
+            page = int(parts[4])
+            if not 0 <= page <= 10000 or not re.fullmatch(r"[a-f0-9]{32}", order_id):
+                raise ValueError
+        except ValueError:
+            await query.answer("سفارش معتبر نیست.", show_alert=True)
+            return
+        order = await state.database.get_owned_order(user.id, category, order_id)
+        if not order:
+            await query.answer("سفارش پیدا نشد.", show_alert=True)
+            return
+        text = (f"📦 {_order_kind(category, order['kind'])}\n"
+                f"شماره: {order_id[:8]}\nوضعیت: {ORDER_STATUS.get(order['status'], 'نامشخص')}\n"
+                f"تاریخ ثبت: {order['created_at']:%Y-%m-%d %H:%M} UTC")
+        if category == "processing" and order.get('minutes'):
+            text += f"\nمدت قابل محاسبه: {order['minutes']} دقیقه"
+            if order.get('package_minutes'):
+                text += f"\nپرداخت: {order['package_minutes']} دقیقه از بسته"
+            elif order.get('amount') is not None:
+                text += f"\nهزینه: {order['amount']:,} تومان"
+        if category in {"processing", "download"} and order.get('source_url'):
+            text += f"\nمنبع: {order['source_url'][:500]}"
+        if category == "download" and order.get('title'):
+            text += f"\nعنوان: {order['title']}"
+        buttons = []
+        link = _order_active_link(order, category, state.settings, datetime.now(UTC))
+        if link:
+            url, expires, kind = link
+            text += f"\n\n⏳ لینک تا {expires:%Y-%m-%d %H:%M} UTC معتبر است."
+            buttons.append([InlineKeyboardButton("▶️ پخش و دانلود" if kind == "player" else "⬇️ دریافت فایل", url=url, style="primary")])
+            if kind == "player":
+                token = url.rsplit('/', 1)[-1]
+                if (Path(state.settings.download_dir) / f"{token}.srt").is_file():
+                    buttons.append([InlineKeyboardButton("📝 دریافت SRT", url=f"{state.settings.download_base_url}/{token}.srt")])
+        elif order['status'] == "completed" and category != "content":
+            if order.get('links') or order.get('token'):
+                text += "\n\nلینک این سفارش منقضی شده یا فایل آن دیگر در دسترس نیست."
+            else:
+                text += "\n\nبرای این سفارش لینک ذخیره نشده؛ فایل ممکن است مستقیماً در چت ارسال شده باشد."
+        if category == "content" and order['status'] == "completed":
+            buttons.append([ui.button("⬇️ دریافت خروجی", f"content:result:{order_id}", style="primary")])
+        if category == "processing" and order['status'] == "completed":
+            buttons.append([ui.button("📝 خروجی‌های تکمیلی و ویرایش", f"content:job:{order_id}")])
+        buttons.append([ui.button("‹ فهرست سفارش‌ها", f"orders:list:{category}:{page}")])
+        await query.answer()
+        await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(buttons), disable_web_page_preview=True)
+        return
+    await query.answer("گزینهٔ نامعتبر است.", show_alert=True)
 
 
 def _parse_package_plan(value: str) -> tuple[int, int, int] | None:
@@ -1581,9 +1947,226 @@ async def team_report(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     await message.reply_text("\n".join(lines))
 
 
+async def _receive_image_reference(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    user, message = update.effective_user, update.effective_message
+    state = _state(context)
+    item = message.photo[-1] if message.photo else message.document
+    if not item or not item.file_size or item.file_size > 10_000_000:
+        await message.reply_text("یک تصویر PNG، JPEG یا WebP با حجم حداکثر ۱۰ مگابایت بفرست.")
+        return
+    try:
+        file = await context.application.bot.get_file(item.file_id)
+        data = bytes(await file.download_as_bytearray())
+    except TelegramError:
+        await message.reply_text("دریافت تصویر ممکن نشد؛ دوباره امتحان کن.")
+        return
+    media_type = image_generation.image_type(data)
+    if not media_type or len(data) > 10_000_000:
+        await message.reply_text("فایل باید یک تصویر PNG، JPEG یا WebP تا ۱۰ مگابایت باشد.")
+        return
+    state.image_references[user.id] = (data, media_type)
+    if message.caption and message.caption.strip():
+        await _receive_image_prompt(update, context, message.caption)
+    else:
+        await message.reply_text("✅ تصویر مرجع دریافت شد. حالا تغییر دلخواهت را توضیح بده؛ می‌توانی تصویر دیگری بفرستی تا جایگزین شود.")
+
+
+async def _receive_image_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE, prompt_text: str | None = None) -> None:
+    user, message = update.effective_user, update.effective_message
+    state = _state(context)
+    prompt = (prompt_text if prompt_text is not None else message.text or "").strip()
+    if not 1 <= len(prompt) <= 3000:
+        await message.reply_text("توضیح تصویر باید بین ۱ تا ۳۰۰۰ نویسه باشد.")
+        return
+    price_key = "image_edit_price" if user.id in state.image_references else "image_price"
+    price = int(await state.database.get_setting(price_key, "0"))
+    if price <= 0:
+        state.awaiting_image_prompt.discard(user.id)
+        state.image_references.pop(user.id, None)
+        await message.reply_text("این نوع سرویس تصویر فعلاً فعال نیست.", reply_markup=ui.back_keyboard())
+        return
+    model = await image_generation.selected_model(state.database)
+    optimizer = (await model_catalog.load_selection(state.database, state.settings, state.api_provider)).translation
+    token = uuid.uuid4().hex[:12]
+    reference = state.image_references.pop(user.id, None)
+    state.image_quotes[str(user.id)] = {"token": token, "prompt": prompt, "price": price,
+                                        "model": model, "optimizer": optimizer, "aspect": "1:1", "reference": reference}
+    state.awaiting_image_prompt.discard(user.id)
+    await message.reply_text(_image_quote_text(state.image_quotes[str(user.id)]), reply_markup=_image_quote_keyboard(token, "1:1"))
+
+
+def _image_quote_text(quote: dict) -> str:
+    labels = {"1:1": "مربع", "2:3": "عمودی", "3:2": "افقی"}
+    return (f"🎨 {'ویرایش تصویر مرجع' if quote.get('reference') else 'ساخت یک تصویر'}\n\nدرخواست: {quote['prompt']}\n\n"
+            f"ابعاد: {labels[quote['aspect']]} · هزینه: {quote['price']:,} تومان\n"
+            "درخواست پیش از ساخت بهینه می‌شود. پس از تأیید هزینه از کیف پول کم می‌شود؛ "
+            "در صورت ناموفق‌بودن ساخت، هزینه برگشت داده می‌شود.")
+
+
+def _image_quote_keyboard(token: str, aspect: str) -> InlineKeyboardMarkup:
+    choices = [("مربع", "1:1"), ("عمودی", "2:3"), ("افقی", "3:2")]
+    return InlineKeyboardMarkup([
+        [ui.button(("✓ " if value == aspect else "") + label, f"image:aspect:{token}:{value}") for label, value in choices],
+        [ui.button("✓ تأیید و ساخت تصویر", f"image:buy:{token}", style="success")],
+        [ui.button("✕ لغو", f"image:cancel:{token}", style="danger")],
+    ])
+
+
+async def image_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query, user = update.callback_query, update.effective_user
+    if not query or not user or not query.message or query.message.chat.type != "private":
+        return
+    state = _state(context)
+    parts = (query.data or "").split(":")
+    action = parts[1] if len(parts) > 1 else ""
+    if action == "start":
+        if user.id in state.active or user.id in state.pending_by_user:
+            await query.answer("ابتدا سفارش فعال خود را تمام یا لغو کن.", show_alert=True)
+            return
+        if not await state.database.has_accepted_terms(user.id):
+            await query.answer("ابتدا شرایط استفاده را بپذیر.", show_alert=True)
+            await query.message.reply_text("برای استفاده ابتدا شرایط را بپذیر.", reply_markup=InlineKeyboardMarkup([[ui.button("📜 شرایط", "terms:show")]]))
+            return
+        if (int(await state.database.get_setting("image_price", "0")) <= 0
+                and int(await state.database.get_setting("image_edit_price", "0")) <= 0):
+            await query.answer("این سرویس هنوز فعال نشده است.", show_alert=True)
+            return
+        state.awaiting_support.discard(user.id)
+        state.awaiting_topup.discard(user.id)
+        state.subtitle_editing.pop(user.id, None)
+        state.image_quotes.pop(str(user.id), None)
+        state.image_references.pop(user.id, None)
+        state.awaiting_image_prompt.add(user.id)
+        await query.answer()
+        await query.message.reply_text("🎨 ساخت یا ویرایش تصویر\n\nبرای ساخت، توضیح تصویر را بفرست. برای ویرایش، ابتدا عکس PNG، JPEG یا WebP تا ۱۰ مگابایت را بفرست و سپس تغییرات را بنویس؛ می‌توانی توضیح را در کپشن عکس هم بنویسی. برای کیفیت اصلی عکس را به‌صورت فایل بفرست.\n\nمتن و عکس پس از تأیید برای سرویس هوش مصنوعی ارسال و در سفارش ذخیره می‌شوند. پیش از کسر هزینه، قیمت و ابعاد را می‌بینی. لغو: /cancel", reply_markup=ui.back_keyboard())
+        return
+    if action == "history":
+        try:
+            page = max(0, min(10000, int(parts[2]))) if len(parts) == 3 else 0
+        except ValueError:
+            await query.answer("صفحه نامعتبر است.", show_alert=True)
+            return
+        rows = await state.database.list_image_orders(user.id, page * 5, 6)
+        buttons = [[ui.button(f"🖼 {row['id'][:8]} · {row['created_at']:%Y-%m-%d} · {row['status']}", f"image:get:{row['id']}")] for row in rows[:5] if row["status"] == "completed"]
+        navigation = []
+        if page:
+            navigation.append(ui.button("‹ قبلی", f"image:history:{page - 1}"))
+        if len(rows) > 5:
+            navigation.append(ui.button("بعدی ›", f"image:history:{page + 1}"))
+        if navigation:
+            buttons.append(navigation)
+        buttons.append([ui.button("⌂ منوی اصلی", "menu:home")])
+        await query.answer()
+        labels = {"queued": "در صف", "completed": "آماده", "refunded": "ناموفق، بازپرداخت‌شده"}
+        listing = "\n".join(f"• {row['id'][:8]} · {labels.get(row['status'], row['status'])} · {row['amount']:,} تومان" for row in rows[:5])
+        await query.edit_message_text(("🖼 سفارش‌های تصویر\n\n" + listing + "\n\nبرای دریافت تصویر آماده دکمهٔ آن را بزن.") if rows else "🖼 در این صفحه سفارشی وجود ندارد.", reply_markup=InlineKeyboardMarkup(buttons))
+        return
+    if action == "get" and len(parts) == 3:
+        saved = await state.database.owned_image(user.id, parts[2])
+        if not saved:
+            await query.answer("تصویر در دسترس نیست.", show_alert=True)
+            return
+        await query.answer()
+        await _send_generated_image(context.application, user.id, saved["image"], saved["media_type"], parts[2])
+        return
+    quote = state.image_quotes.get(str(user.id))
+    if len(parts) < 3 or not quote or quote["token"] != parts[2] or quote.get("confirming"):
+        await query.answer("این سفارش دیگر معتبر نیست.", show_alert=True)
+        return
+    if action == "cancel":
+        state.image_quotes.pop(str(user.id), None)
+        await query.answer()
+        await query.edit_message_text("سفارش تصویر لغو شد.", reply_markup=ui.back_keyboard())
+        return
+    if action == "aspect" and len(parts) == 5 and ":".join(parts[3:]) in {"1:1", "2:3", "3:2"}:
+        quote["aspect"] = ":".join(parts[3:])
+        await query.answer()
+        await query.edit_message_text(_image_quote_text(quote), reply_markup=_image_quote_keyboard(parts[2], quote["aspect"]))
+        return
+    if action != "buy" or len(parts) != 3:
+        await query.answer("انتخاب معتبر نیست.", show_alert=True)
+        return
+    if user.id in state.active or user.id in state.pending_by_user:
+        await query.answer("ابتدا سفارش فعال خود را تمام یا لغو کن.", show_alert=True)
+        return
+    quote["confirming"] = True
+    try:
+        price_key = "image_edit_price" if quote["reference"] else "image_price"
+        if (int(await state.database.get_setting(price_key, "0")) != quote["price"]
+                or await image_generation.selected_model(state.database) != quote["model"]):
+            state.image_quotes.pop(str(user.id), None)
+            await query.answer("تنظیم سرویس تغییر کرده؛ دوباره سفارش بده.", show_alert=True)
+            return
+        model, optimizer = quote["model"], quote["optimizer"]
+        for provider in {model.provider, optimizer.provider}:
+            if not (state.settings.openai_api_key if provider == "openai" else state.settings.openrouter_api_key):
+                await query.answer("سرویس تصویر یا بهینه‌سازی فعلاً در دسترس نیست.", show_alert=True)
+                return
+        order_id = uuid.uuid4().hex
+        reference, reference_type = quote["reference"] or (None, None)
+        result = await state.database.create_image_order(order_id, user.id, query.message.chat_id,
+            quote["prompt"], quote["aspect"], model.provider, model.model, optimizer.provider, optimizer.model, quote["price"], reference, reference_type)
+        if result != "created":
+            await query.answer("موجودی کافی نیست؛ ابتدا کیف پول را شارژ کن.", show_alert=True)
+            return
+        state.image_quotes.pop(str(user.id), None)
+        job = ImageJob(order_id, user.id, query.message.chat_id, query.message.message_id,
+                       quote["prompt"], quote["aspect"], model, optimizer, reference, reference_type)
+        state.active[user.id] = job
+        await state.queue.put(job)
+        await query.answer("سفارش ثبت شد.")
+        await query.edit_message_text("🎨 سفارش تصویر در صف قرار گرفت.", reply_markup=ui.job_keyboard(job.id))
+    finally:
+        quote["confirming"] = False
+
+
+async def _send_generated_image(application, chat_id: int, data: bytes, media_type: str, order_id: str) -> None:
+    ext = {"image/png": "png", "image/jpeg": "jpg", "image/webp": "webp"}.get(media_type, "png")
+    document = BytesIO(data)
+    document.name = f"image-{order_id[:8]}.{ext}"
+    await application.bot.send_document(chat_id, document, caption=f"🎨 تصویر سفارش {order_id[:8]} · فایل با کیفیت اصلی")
+
+
+async def _run_image_job(application: Application, state: BotState, job: ImageJob) -> None:
+    completed = False
+    try:
+        if job.cancel_event.is_set():
+            raise JobCancelled()
+        await _safe_progress(application, job, "✨ در حال بهینه‌سازی توضیح تصویر…", interactive=True)
+        optimized, prompt_cost = await asyncio.to_thread(image_generation.optimize_prompt, job.prompt, state.settings, job.optimizer, job.reference, job.reference_type)
+        if not await state.database.set_image_prompt(job.id, optimized, prompt_cost):
+            raise RuntimeError("Image order is no longer pending")
+        if job.cancel_event.is_set():
+            raise JobCancelled()
+        await _safe_progress(application, job, "🎨 در حال ساخت تصویر… ممکن است چند دقیقه طول بکشد.", interactive=True)
+        data, media_type, image_cost = await asyncio.to_thread(image_generation.generate_image, optimized, job.prompt, job.aspect, state.settings, job.model, job.reference, job.reference_type)
+        if job.cancel_event.is_set():
+            raise JobCancelled()
+        job.delivery_started = True
+        if not await state.database.finish_image_order(job.id, data, media_type, image_cost):
+            raise RuntimeError("Image order could not be completed")
+        completed = True
+        await _send_generated_image(application, job.chat_id, data, media_type, job.id)
+        await _safe_progress(application, job, "✅ تصویر آماده شد؛ از بخش تصاویر من هم می‌توانی دوباره دریافتش کنی.")
+    except Exception:
+        logger.exception("Image order %s failed", job.id)
+        if completed:
+            await _safe_progress(application, job, "تصویر ساخته و ذخیره شد، اما ارسال ناموفق بود. از بخش تصاویر من دوباره دریافتش کن.")
+        else:
+            try:
+                refunded = await state.database.refund_image_order(job.id)
+            except Exception:
+                logger.exception("Could not refund image order %s", job.id)
+                refunded = False
+            await _safe_progress(application, job, "ساخت تصویر کامل نشد. " + ("هزینه به کیف پول برگشت." if refunded else "برای پیگیری با پشتیبانی تماس بگیر."))
+    finally:
+        state.active.pop(job.user_id, None)
+        state.queue.task_done()
+
+
 async def content_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query, user = update.callback_query, update.effective_user
-    if not query or not user:
+    if not query or not user or not query.message or query.message.chat.type != "private":
         return
     state = _state(context)
     parts = (query.data or "").split(":")
@@ -1724,12 +2307,12 @@ async def _run_content_job(application: Application, state: BotState, job: Conte
         if job.cancel_event.is_set():
             raise JobCancelled()
         await _safe_progress(application, job, "📝 در حال تولید محتوای تکمیلی…")
-        result = await asyncio.to_thread(generate_content, job.subtitle, job.kind, state.settings, job.models, job.cancel_event)
+        result, api_cost_usd = await asyncio.to_thread(generate_content, job.subtitle, job.kind, state.settings, job.models, job.cancel_event)
         if job.cancel_event.is_set():
             raise JobCancelled()
         document = BytesIO(result.encode("utf-8")); document.name = "summary-fa.txt" if job.kind == "summary" else "content-pack-fa.txt"
         await application.bot.send_document(job.chat_id, document, caption="✅ محتوای تولیدشده آماده است؛ پیش از انتشار بررسی‌اش کن.")
-        if not await state.database.finish_content_order(job.id, result):
+        if not await state.database.finish_content_order(job.id, result, api_cost_usd):
             raise RuntimeError("Content order status changed before completion")
         await _safe_progress(application, job, "✅ محتوای تکمیلی ارسال شد.")
     except Exception:
@@ -1749,6 +2332,7 @@ async def _run_download_job(application: Application, state: BotState, job: Down
     try:
         if job.cancel_event.is_set():
             raise JobCancelled()
+        await state.database.update_download_task(job.id, "running")
         url = job.url
         if job.source == "spotify":
             await _safe_progress(application, job, "🔎 جست‌وجوی نسخهٔ مشابه در YouTube…")
@@ -1762,6 +2346,7 @@ async def _run_download_job(application: Application, state: BotState, job: Down
         if job.cancel_event.is_set():
             raise JobCancelled()
         caption = f"✅ {title}" + ("\nنسخهٔ یافت‌شده در YouTube؛ ممکن است با نسخهٔ Spotify متفاوت باشد." if job.source == "spotify" else "")
+        token, suffix, expires_at = None, None, None
         if output.stat().st_size <= 48_000_000:
             with output.open('rb') as media:
                 if job.kind == "audio":
@@ -1772,17 +2357,29 @@ async def _run_download_job(application: Application, state: BotState, job: Down
             suffix = 'mp3' if job.kind == 'audio' else 'mp4'
             token = await asyncio.to_thread(publish_download, output, Path(state.settings.download_dir), state.settings.download_ttl_hours, suffix=suffix)
             link = f"{state.settings.download_base_url}/{token}.{suffix}"
+            expires_at = datetime.now(UTC) + timedelta(hours=state.settings.download_ttl_hours)
             await application.bot.send_message(job.chat_id,
                 f"{caption}\nلینک تا {state.settings.download_ttl_hours} ساعت فعال است.",
                 reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬇️ دریافت فایل", url=link, style="primary")]]))
         else:
+            await state.database.update_download_task(job.id, "failed")
             await _safe_progress(application, job, "فایل از سقف ارسال تلگرام بزرگ‌تر است و لینک دانلود روی سرور تنظیم نشده. با پشتیبانی تماس بگیر.")
             return
+        await state.database.update_download_task(job.id, "completed", title=title, token=token,
+                                                  extension=suffix, expires_at=expires_at)
         await _safe_progress(application, job, "✅ فایل آماده و ارسال شد.")
     except JobCancelled:
+        try:
+            await state.database.update_download_task(job.id, "cancelled")
+        except Exception:
+            logger.exception("Could not persist cancelled download %s", job.id)
         await _safe_progress(application, job, "دانلود لغو شد.")
     except Exception:
         logger.exception("Download failed for job %s", job.id)
+        try:
+            await state.database.update_download_task(job.id, "failed")
+        except Exception:
+            logger.exception("Could not persist failed download %s", job.id)
         await _safe_progress(application, job, "دانلود انجام نشد. لینک ممکن است خصوصی، چندبخشی یا در این سرویس موقتاً غیرقابل‌دسترسی باشد؛ دوباره تلاش کن.")
     finally:
         cleanup(job.directory)
@@ -1810,6 +2407,9 @@ async def worker(application: Application) -> None:
             continue
         if isinstance(job, ContentJob):
             await _run_content_job(application, state, job)
+            continue
+        if isinstance(job, ImageJob):
+            await _run_image_job(application, state, job)
             continue
         progress_queue: asyncio.Queue[tuple[str, int] | None] | None = None
         progress_task: asyncio.Task | None = None
@@ -1854,10 +2454,15 @@ async def worker(application: Application) -> None:
                 job.api_provider,
                 job.models,
                 job.team_glossary,
+                job.dub_mode,
             )
             subtitle_text = srt.read_text(encoding="utf-8")
             if job.cancel_event.is_set():
                 raise JobCancelled()
+            await stop_progress_updates()
+            if job.cancel_event.is_set():
+                raise JobCancelled()
+            job.delivery_started = True
             await _publish_progress(application, job, "ارسال ویدیو", 95)
             receipt = _receipt_text(job)
             completion_note = "پردازش کامل شد؛ ویدیوی آماده ارسال شد."
@@ -1923,7 +2528,7 @@ async def worker(application: Application) -> None:
                         video=video_file,
                         supports_streaming=True,
                         caption=(
-                            "ویدیو با دوبلهٔ فارسی؛ صدای دوبله با هوش مصنوعی تولید شده."
+                            "ویدیو با دوبلهٔ فارسی؛ صدای اصلی در پس‌زمینه حفظ شده و ممکن است دیالوگ اصلی هم شنیده شود."
                             if job.mode == "dub"
                             else "ویدیو با زیرنویس فارسی"
                         ),
@@ -2028,22 +2633,32 @@ async def worker(application: Application) -> None:
             state.queue.task_done()
 
 
-async def _safe_progress(application: Application, job: Job, text: str) -> None:
+async def _safe_progress(application: Application, job: Job, text: str, *, interactive: bool = False) -> bool:
     try:
-        await application.bot.edit_message_text(text, job.chat_id, job.message_id)
+        await application.bot.edit_message_text(text, job.chat_id, job.message_id,
+                                                reply_markup=ui.job_keyboard(job.id, cancellable=not job.delivery_started) if interactive else None)
+        return True
     except Exception:
         logger.debug("Could not update job progress", exc_info=True)
+        return False
 
 
 def _progress_text(stage: str, percent: int) -> str:
     percent = max(0, min(100, percent))
-    filled = round(percent / 10)
+    filled = percent // 10
     bar = "▰" * filled + "▱" * (10 - filled)
-    return f"{stage}\n{bar} {percent}%"
+    return f"{'✅' if percent == 100 else '⏳'} {stage}\n{bar} {percent}%"
 
 
 async def _publish_progress(application: Application, job: Job, stage: str, percent: int) -> None:
-    text = _progress_text(stage, percent)
+    job.progress_percent = max(job.progress_percent, min(99, max(0, percent)))
+    job.progress_stage = stage
+    text = _progress_text(stage, job.progress_percent) + "\nدرصد تقریبی است."
+    now = asyncio.get_running_loop().time()
+    if text != job.progress_last_text and (job.delivery_started or now - job.progress_last_edit >= 5 or not job.progress_last_text):
+        if await _safe_progress(application, job, text, interactive=True):
+            job.progress_last_edit = now
+            job.progress_last_text = text
     if job.can_use_draft:
         draft_sender = getattr(application.bot, "send_message_draft", None)
         if callable(draft_sender):
@@ -2059,7 +2674,10 @@ async def _publish_progress(application: Application, job: Job, stage: str, perc
                 # Fall back to the durable status message if Telegram rejects a draft.
                 logger.debug("Telegram live draft unavailable (%s)", type(exc).__name__)
         job.can_use_draft = False
-    await _safe_progress(application, job, text)
+    if text != job.progress_last_text:
+        if await _safe_progress(application, job, text, interactive=True):
+            job.progress_last_edit = now
+            job.progress_last_text = text
 
 
 async def _progress_updater(
@@ -2105,7 +2723,10 @@ async def _finish_progress(
             # chat message, as required by the Bot API.
             await application.bot.send_message(chat_id=job.chat_id, text=text)
             job.draft_was_used = False
-            await application.bot.delete_message(job.chat_id, job.message_id)
+            try:
+                await application.bot.delete_message(job.chat_id, job.message_id)
+            except TelegramError:
+                logger.debug("Could not remove old progress message", exc_info=True)
             return
         except TelegramError as exc:
             logger.debug("Could not finalize Telegram live draft (%s)", type(exc).__name__)
@@ -2254,6 +2875,12 @@ async def post_init(application: Application) -> None:
                 await application.bot.send_message(order["chat_id"], "پردازش محتوای تکمیلی به دلیل راه‌اندازی مجدد متوقف شد و هزینه به کیف پول برگشت.")
         except Exception:
             logger.exception("Could not refund interrupted content order %s", order["id"])
+    for order in await database.unfinished_image_orders():
+        try:
+            if await database.refund_image_order(order["id"]):
+                await application.bot.send_message(order["chat_id"], "سفارش تصویر با راه‌اندازی مجدد متوقف شد و هزینه به کیف پول برگشت.")
+        except Exception:
+            logger.exception("Could not refund interrupted image order %s", order["id"])
     for interrupted in await database.interrupted_wallet_jobs():
         try:
             refund = await database.refund_job_wallet(interrupted["job_id"])
@@ -2353,15 +2980,20 @@ def main() -> None:
     application.add_handler(CallbackQueryHandler(admin_callback, pattern=r"^admin:"))
     application.add_handler(CallbackQueryHandler(terms_callback, pattern=r"^terms:"))
     application.add_handler(CallbackQueryHandler(menu_callback, pattern=r"^menu:"))
+    application.add_handler(CallbackQueryHandler(orders_callback, pattern=r"^orders:"))
     application.add_handler(CallbackQueryHandler(content_callback, pattern=r"^content:"))
+    application.add_handler(CallbackQueryHandler(image_callback, pattern=r"^image:"))
     application.add_handler(CallbackQueryHandler(packages_callback, pattern=r"^packs:"))
     application.add_handler(CallbackQueryHandler(team_join_callback, pattern=r"^team:join:"))
     application.add_handler(CallbackQueryHandler(choose_mode, pattern=r"^mode:"))
+    application.add_handler(CallbackQueryHandler(cancel_job_callback, pattern=r"^job_cancel:"))
+    application.add_handler(CallbackQueryHandler(choose_dub_mode, pattern=r"^dubmode:"))
     application.add_handler(CallbackQueryHandler(choose_download, pattern=r"^dl:"))
     application.add_handler(CallbackQueryHandler(choose_quality, pattern=r"^quality:"))
     application.add_handler(CallbackQueryHandler(confirm_order, pattern=r"^confirm:"))
     application.add_handler(CallbackQueryHandler(cancel_order_callback, pattern=r"^order_cancel:"))
     application.add_handler(CallbackQueryHandler(back_to_mode, pattern=r"^order_back:"))
+    application.add_handler(CallbackQueryHandler(back_to_quality, pattern=r"^order_quality_back:"))
     application.add_handler(CallbackQueryHandler(deposit_action, pattern=r"^deposit:"))
     application.add_handler(CallbackQueryHandler(wallet_callback, pattern=r"^wallet:"))
     application.add_handler(MessageHandler(filters.SUCCESSFUL_PAYMENT, legacy_stars_refund))

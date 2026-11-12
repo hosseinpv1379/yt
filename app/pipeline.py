@@ -16,13 +16,14 @@ from typing import Callable
 from urllib.parse import urlencode, urlparse
 
 import httpx
-from openai import OpenAI
+from openai import APIStatusError, OpenAI
 from pydub import AudioSegment
 from websockets.sync.client import connect
 import yt_dlp
 
 from .config import Settings
 from .model_catalog import ModelSelection, defaults
+from .subtitles import caption_cues, source_cues
 
 logger = logging.getLogger(__name__)
 CHUNK_SECONDS = 8 * 60
@@ -30,6 +31,8 @@ TRANSLATION_BATCH_SIZE = 40
 DUB_GROUP_MAX_MS = 30_000
 DUB_GROUP_MAX_CHARS = 1_200
 DUB_GROUP_MAX_PAUSE_MS = 2_500
+DUB_NORMAL_MAX_TEMPO = 1.4
+DUB_FALLBACK_MAX_TEMPO = 1.8
 ProgressCallback = Callable[[str, int], None]
 WHISPER_PRICE_PER_MINUTE = 0.006
 
@@ -374,21 +377,36 @@ def _download(
 
 
 def _transcribe(
-    audio_path: Path, client: OpenAI, model: str
+    audio_path: Path, client: OpenAI, model: str, *, word_timestamps: bool = False,
 ) -> tuple[list[dict], float | None]:
     with audio_path.open("rb") as audio:
-        response = client.audio.transcriptions.create(
-            model=model,
-            file=audio,
-            response_format="verbose_json",
-            timestamp_granularities=["segment"],
-        )
+        try:
+            response = client.audio.transcriptions.create(
+                model=model, file=audio, response_format="verbose_json",
+                timestamp_granularities=["segment", "word"] if word_timestamps else ["segment"],
+            )
+        except APIStatusError as exc:
+            detail = str(exc).lower()
+            if not word_timestamps or exc.status_code not in {400, 422} or "timestamp" not in detail:
+                raise
+            logger.warning("Word timestamp request rejected; using segment timestamps")
+            audio.seek(0)
+            response = client.audio.transcriptions.create(
+                model=model, file=audio, response_format="verbose_json",
+                timestamp_granularities=["segment"],
+            )
     segments = []
-    for segment in response.segments or []:
+    for segment in getattr(response, "segments", None) or []:
         text = (segment.text or "").strip()
         start, end = float(segment.start), float(segment.end)
         if text and 0 <= start < end:
             segments.append({"start": start, "end": end, "text": text})
+    if word_timestamps:
+        raw_words = getattr(response, "words", None) or []
+        reference = (getattr(response, "text", "") or "").strip() or " ".join(s["text"] for s in segments)
+        segments, timed_by_word = source_cues(segments, raw_words, reference)
+        if not timed_by_word and segments:
+            logger.info("Word timestamps unavailable or incomplete; subtitle timing is estimated within source segments")
     if not segments and getattr(response, "text", "").strip():
         raise RuntimeError("مدل رونویسی زمان‌بندی بخش‌ها را برنگرداند؛ مدل دارای timestamp لازم است.")
     usage = getattr(response, "usage", None)
@@ -659,7 +677,8 @@ def _create_dubbed_audio(
                 progress_callback(f"ساخت صدای دوبله ({index + 1}/{len(groups)} بخش)", percent)
 
     dubbed_audio = job_dir / "dubbed-fa.wav"
-    mixed.export(dubbed_audio, format="wav")
+    with dubbed_audio.open("wb") as stream:
+        mixed.export(stream, format="wav")
     return dubbed_audio, tts_cost, rewrite_cost
 
 
@@ -706,7 +725,8 @@ def _create_openrouter_dubbed_audio(
             progress_callback(f"ساخت صدای دوبله ({index + 1}/{len(groups)} بخش)", percent)
 
     dubbed_audio = job_dir / "dubbed-fa.wav"
-    mixed.export(dubbed_audio, format="wav")
+    with dubbed_audio.open("wb") as stream:
+        mixed.export(stream, format="wav")
     return dubbed_audio, None, rewrite_cost
 
 
@@ -797,8 +817,13 @@ def _shorten_dub_text(client: OpenAI, model: str, text: str, slot_ms: int,
         rewritten = json.loads(choice.message.content or "{}")["text"].strip()
     except (ValueError, KeyError, TypeError, AttributeError) as exc:
         raise RuntimeError("مدل بازنویسی دوبله پاسخ معتبر نداد.") from exc
-    if not rewritten or len(rewritten) >= len(text):
-        raise RuntimeError("کوتاه‌سازی متن دوبله ممکن نشد.")
+    if not rewritten:
+        raise RuntimeError("مدل بازنویسی دوبله متن خالی برگرداند.")
+    # A model may return the same sentence or a longer paraphrase. A fresh
+    # TTS sample may still be shorter, and refusing here aborts the whole job.
+    # Do not automatically truncate text when the rewrite is longer.
+    if len(rewritten) > len(text):
+        rewritten = text
     usage = response.usage
     if not usage:
         return rewritten, None
@@ -816,6 +841,7 @@ def _synthesize_fitting_dub(text: str, slot_ms: int, audio_dir: Path, index: int
         raise RuntimeError("زمان کافی برای قرار دادن صدای دوبله وجود ندارد.")
     tts_cost: float | None = 0.0
     rewrite_cost: float | None = 0.0
+    best_speech: AudioSegment | None = None
     for attempt in range(3):
         if cancel_event is not None:
             _check_cancel(cancel_event)
@@ -823,38 +849,54 @@ def _synthesize_fitting_dub(text: str, slot_ms: int, audio_dir: Path, index: int
         tts_cost = _sum_known_costs(tts_cost, request_cost)
         if not speech:
             raise RuntimeError("سرویس دوبله صدای خالی برگرداند.")
-        if len(speech) <= slot_ms * 1.4:
+        if best_speech is None or len(speech) < len(best_speech):
+            best_speech = speech
+        if len(speech) <= slot_ms * DUB_NORMAL_MAX_TEMPO:
             return _fit_dub_speech(speech, slot_ms, audio_dir, index), tts_cost, rewrite_cost
         if attempt == 2 or not translation_model:
             break
         if cancel_event is not None:
             _check_cancel(cancel_event)
+        previous_text = text
         text, cost = _shorten_dub_text(client, translation_model, text, slot_ms, len(speech))
         rewrite_cost = _sum_known_costs(rewrite_cost, cost)
-        logger.info("Retrying dubbed audio group %d with shorter text (attempt %d)", index + 1, attempt + 2)
+        logger.info("Retrying dubbed audio group %d (attempt %d, rewrite_changed=%s)",
+                    index + 1, attempt + 2, text != previous_text)
+    # Prefer a faster complete utterance to rejecting the job, but cap the
+    # pace; do not cut audio or overlap the following segment.
+    if best_speech is not None and len(best_speech) <= slot_ms * DUB_FALLBACK_MAX_TEMPO:
+        if cancel_event is not None:
+            _check_cancel(cancel_event)
+        logger.warning("Dub group %d needs faster playback to fit (%.2fx)", index + 1,
+                       len(best_speech) / slot_ms)
+        return (_fit_dub_speech(best_speech, slot_ms, audio_dir, index,
+                                max_tempo=DUB_FALLBACK_MAX_TEMPO), tts_cost, rewrite_cost)
     raise RuntimeError("صدای دوبله پس از تلاش مجدد در زمان ویدیو جا نشد.")
 
 
 def _fit_dub_speech(
-    speech: AudioSegment, slot_ms: int, audio_dir: Path, index: int
+    speech: AudioSegment, slot_ms: int, audio_dir: Path, index: int,
+    *, max_tempo: float = DUB_NORMAL_MAX_TEMPO,
 ) -> AudioSegment:
     if slot_ms <= 0:
         raise RuntimeError("زمان کافی برای قرار دادن صدای دوبله وجود ندارد.")
     if len(speech) <= slot_ms:
         return speech
     requested_tempo = len(speech) / slot_ms
-    tempo = min(1.4, requested_tempo * 1.01)
-    if requested_tempo > 1.4:
+    tempo = min(max_tempo, requested_tempo * 1.01)
+    if requested_tempo > max_tempo:
         raise RuntimeError("صدای دوبله در زمان ویدیو جا نمی‌شود؛ پردازش برای جلوگیری از تحویل صدای ناقص متوقف شد.")
     source = audio_dir / f"group_{index:04d}.wav"
     fitted = audio_dir / f"group_{index:04d}_fit.wav"
-    speech.export(source, format="wav")
+    with source.open("wb") as stream:
+        speech.export(stream, format="wav")
     _run([
         "ffmpeg", "-hide_banner", "-loglevel", "error", "-y", "-i", str(source),
         "-filter:a", f"atempo={tempo:.4f}", "-ac", "1", "-ar", "24000",
         "-c:a", "pcm_s16le", str(fitted),
     ])
-    result = AudioSegment.from_wav(fitted)
+    with fitted.open("rb") as stream:
+        result = AudioSegment.from_wav(stream)
     if len(result) > slot_ms:
         raise RuntimeError("صدای دوبله پس از تنظیم سرعت در بازهٔ زمانی جا نشد.")
     return result
@@ -991,11 +1033,23 @@ def _realtime_speech_cost(model: str, usage: dict) -> float | None:
     return cost
 
 
-def _mux_dubbed_video(video: Path, audio: Path, output: Path, watermark_text: str = "") -> None:
+def _mux_dubbed_video(video: Path, audio: Path, output: Path, watermark_text: str = "", background: Path | None = None) -> None:
+    # Keep the source sound bed throughout the whole video. Duck it smoothly
+    # under Persian speech, then mix and limit peaks. This is not source
+    # separation: the original dialogue can remain audible.
+    audio_mix = (
+        f"[{2 if background else 0}:a:0]aformat=sample_rates=48000:channel_layouts=stereo,volume=0.45[bed];"
+        "[1:a:0]aformat=sample_rates=48000:channel_layouts=stereo,asplit=2[voice_sc][voice];"
+        "[bed][voice_sc]sidechaincompress=threshold=0.04:ratio=4:attack=40:release=350[ducked];"
+        "[ducked][voice]amix=inputs=2:duration=first:dropout_transition=0:normalize=0,"
+        "alimiter=limit=0.92:level=disabled:latency=1[mixed]"
+    )
     args = [
         "ffmpeg", "-hide_banner", "-loglevel", "error", "-y", "-i", str(video), "-i", str(audio),
-        "-map", "0:v:0", "-map", "1:a:0",
     ]
+    if background:
+        args.extend(["-i", str(background)])
+    args.extend(["-filter_complex", audio_mix, "-map", "0:v:0", "-map", "[mixed]"])
     watermark = _watermark_filter(watermark_text, output.parent)
     if watermark:
         args.extend([
@@ -1021,12 +1075,28 @@ def process_video(
     provider: str = "openai",
     model_selection: ModelSelection | None = None,
     team_glossary: str = "",
+    dub_mode: str = "simple",
 ) -> tuple[Path, Path, Path, OpenAICost]:
     job_dir.mkdir(parents=True, exist_ok=True)
     _check_cancel(cancel_event)
     if progress_callback:
         progress_callback("دانلود ویدیو", 0)
     video, context = _download(url, job_dir, settings, selected_height, progress_callback)
+    background = None
+    if mode == "dub" and dub_mode == "smart":
+        if not settings.dub_separator_url:
+            raise RuntimeError("سرویس دوبلهٔ هوشمند فعال نیست.")
+        if progress_callback:
+            progress_callback("تفکیک صدای پس‌زمینه (ممکن است طول بکشد)", 20)
+        try:
+            response = httpx.post(settings.dub_separator_url + "/separate", json={"job_id": job_dir.name, "source": video.name}, timeout=httpx.Timeout(14400, connect=5))
+            response.raise_for_status()
+        except httpx.HTTPError as exc:
+            raise RuntimeError("تفکیک صدای پس‌زمینه ناموفق بود.") from exc
+        background = job_dir / "dub-background.wav"
+        if not background.is_file() or abs(_media_duration(background) - _media_duration(video)) > 1.0:
+            raise RuntimeError("فایل صدای تفکیک‌شده نامعتبر است.")
+        _check_cancel(cancel_event)
     if team_glossary:
         context += "\nواژه‌نامهٔ تیم (اصطلاح و معادل، فقط برای ترجمه):\n" + team_glossary[:2000]
     _check_cancel(cancel_event)
@@ -1073,7 +1143,9 @@ def process_video(
         progress_callback("تبدیل گفتار به متن", 38)
     for index, chunk in enumerate(chunks):
         _check_cancel(cancel_event)
-        transcribed_segments, request_cost = _transcribe(chunk, transcription_client, transcription_model)
+        transcribed_segments, request_cost = _transcribe(
+            chunk, transcription_client, transcription_model, word_timestamps=(mode == "subtitle")
+        )
         if request_cost is not None:
             transcribed_cost += request_cost
         elif selection.stt.provider == "openai":
@@ -1102,12 +1174,15 @@ def process_video(
         for_dubbing=mode == "dub", cancel_event=cancel_event,
     )
     tts_cost: float | None = 0.0
+    # The dub keeps the original translated speech groups; subtitles use
+    # separately segmented, non-overlapping display cues.
+    display_segments = caption_cues(segments)
     srt_path = job_dir / "fa.srt"
-    _write_srt(segments, srt_path)
+    _write_srt(display_segments, srt_path)
     vtt_path = job_dir / "fa.vtt"
-    _write_vtt(segments, vtt_path, isolate_ltr=True)
+    _write_vtt(display_segments, vtt_path, isolate_ltr=True)
     render_srt_path = job_dir / "fa-render.srt"
-    _write_srt(segments, render_srt_path, isolate_ltr=True)
+    _write_srt(display_segments, render_srt_path, isolate_ltr=True)
     _check_cancel(cancel_event)
     output = job_dir / "video-fa.mp4"
     if mode == "dub":
@@ -1125,7 +1200,7 @@ def process_video(
         translation_cost = _sum_known_costs(translation_cost, rewrite_cost)
         if progress_callback:
             progress_callback("ترکیب صدای دوبله با ویدیو", 92)
-        _mux_dubbed_video(video, dubbed_audio, output, settings.watermark_text)
+        _mux_dubbed_video(video, dubbed_audio, output, settings.watermark_text, background)
     else:
         if settings.watermark_text or not settings.download_base_url:
             if progress_callback:

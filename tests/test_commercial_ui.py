@@ -11,7 +11,7 @@ class CommercialUiTests(unittest.IsolatedAsyncioTestCase):
     async def test_disabled_content_never_charges(self):
         db = SimpleNamespace(owned_subtitle=AsyncMock(return_value='test'), get_setting=AsyncMock(return_value='0'), create_content_order=AsyncMock())
         state = BotState(SimpleNamespace(default_api_provider='openai'), db)
-        query = SimpleNamespace(data='content:quote:summary:' + 'a' * 32, answer=AsyncMock(), edit_message_text=AsyncMock())
+        query = SimpleNamespace(data='content:quote:summary:' + 'a' * 32, message=SimpleNamespace(chat=SimpleNamespace(type='private')), answer=AsyncMock(), edit_message_text=AsyncMock())
         update = SimpleNamespace(callback_query=query, effective_user=SimpleNamespace(id=1))
         await content_callback(update, SimpleNamespace(application=SimpleNamespace(bot_data={'state': state})))
         db.create_content_order.assert_not_awaited()

@@ -45,6 +45,32 @@ services:
     networks:
       - app
 
+  separator-init:
+    image: alpine:3.22
+    profiles: ["smart"]
+    user: "0:0"
+    command: ["sh", "-c", "mkdir -p /models /data && chown 10001:10001 /models /data"]
+    volumes:
+      - separator-models:/models
+      - workdata:/data
+    restart: "no"
+
+  dub-separator:
+    build:
+      context: .
+      dockerfile: Dockerfile.separator
+    profiles: ["smart"]
+    restart: unless-stopped
+    init: true
+    volumes:
+      - workdata:/data
+      - separator-models:/models
+    depends_on:
+      separator-init:
+        condition: service_completed_successfully
+    networks:
+      - app
+
   bot:
     build: .
     image: youtube-fa-subtitle-bot:local
@@ -71,6 +97,7 @@ services:
       VIDEO_MAX_HEIGHT: ${VIDEO_MAX_HEIGHT:-720}
       MAX_FILE_BYTES: ${MAX_FILE_BYTES:-1000000000}
       WORK_DIR: /data
+      DUB_SEPARATOR_URL: ${DUB_SEPARATOR_URL:-}
       YOUTUBE_COOKIES_FILE: ${YOUTUBE_COOKIES_FILE:-}
       INSTAGRAM_COOKIES_FILE: ${INSTAGRAM_COOKIES_FILE:-}
       YTDLP_POT_BASE_URL: ${YTDLP_POT_BASE_URL:-http://pot-provider:4416}
@@ -107,6 +134,7 @@ volumes:
   workdata:
   download-store:
   postgres-data:
+  separator-models:
 
 networks:
   app:

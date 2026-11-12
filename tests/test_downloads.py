@@ -57,7 +57,7 @@ class LinkTests(unittest.TestCase):
 
 class DownloadOrderTests(unittest.IsolatedAsyncioTestCase):
     async def test_download_queues_once_without_wallet_charge(self):
-        state = BotState(SimpleNamespace(default_api_provider='openai', work_dir='/tmp'), SimpleNamespace())
+        state = BotState(SimpleNamespace(default_api_provider='openai', work_dir='/tmp'), SimpleNamespace(create_download_task=AsyncMock()))
         selection = PendingQuality(1, 1, 'https://www.instagram.com/reel/a', 22, True, 'openai', download_source='social')
         state.pending_quality['abc'] = selection; state.pending_by_user[1] = 'abc'
         query = SimpleNamespace(data='dl:abc:video', answer=AsyncMock(), edit_message_text=AsyncMock())
@@ -73,7 +73,7 @@ class DownloadDeliveryTests(unittest.IsolatedAsyncioTestCase):
         from app.bot import DownloadJob, _run_download_job
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            state = BotState(SimpleNamespace(default_api_provider='openai'), SimpleNamespace())
+            state = BotState(SimpleNamespace(default_api_provider='openai'), SimpleNamespace(update_download_task=AsyncMock()))
             job = DownloadJob('job', 1, 2, 'https://www.instagram.com/reel/a', 3, root / 'job', 'audio', 'social')
             state.active[1] = job
             await state.queue.put(job)

@@ -8,6 +8,20 @@ from app.bot import BotState, PendingQuality, choose_quality, confirm_order
 
 
 class OrderTests(unittest.IsolatedAsyncioTestCase):
+    async def test_smart_unavailable_never_charges(self):
+        settings = SimpleNamespace(default_api_provider='openai', dub_separator_url='')
+        db = SimpleNamespace(create_wallet_job=AsyncMock(), create_package_job=AsyncMock())
+        state = BotState(settings, db)
+        state.pending_quality['token'] = PendingQuality(1, 1, 'https://youtu.be/example', 42, True,
+            'openai', mode='dub', duration_seconds=61, quoted_rate=10000, dub_mode='smart')
+        query = SimpleNamespace(data='confirm:token', answer=AsyncMock(), edit_message_text=AsyncMock())
+        update = SimpleNamespace(callback_query=query, effective_user=SimpleNamespace(id=1))
+        context = SimpleNamespace(application=SimpleNamespace(bot_data={'state': state}))
+        await confirm_order(update, context)
+        db.create_wallet_job.assert_not_awaited()
+        db.create_package_job.assert_not_awaited()
+        self.assertFalse(state.pending_quality['token'].confirming)
+
     async def test_price_is_shown_before_single_charge(self):
         settings = SimpleNamespace(default_api_provider='openai', openai_api_key='key',
             openrouter_api_key='', default_subtitle_price_toman_per_minute=5000,
