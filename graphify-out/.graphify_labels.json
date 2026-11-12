@@ -1,0 +1,22 @@
+{
+  "0": "bot.py",
+  "1": "BotState",
+  "2": "Database",
+  "3": "worker",
+  "4": "test_downloads.py",
+  "5": "subtitles.py",
+  "6": "database.py",
+  "7": "openai_limits.py",
+  "8": "pipeline.py",
+  "9": "ربات تجاری تلگرام برای زیرنویس و دوبله فارسی یوتیوب",
+  "10": "JobCancelled",
+  "11": "Project agent guidance",
+  "12": "DatabaseIntegrationTests",
+  "13": "OpenRouterRateLimiter",
+  "14": "_order_active_link",
+  "15": "server.py",
+  "18": "WalletTransaction",
+  "19": "test_database_integration.py",
+  "21": ".add_download",
+  "22": "SeparatorTests"
+}

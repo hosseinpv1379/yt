@@ -1,0 +1,9 @@
+.env
+.env.*
+secrets/
+data/
+.venv/
+.venv-graphify/
+.agents/
+.cursor/
+graphify-out/

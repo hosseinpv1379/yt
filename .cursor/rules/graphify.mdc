@@ -1,0 +1,11 @@
+---
+description: Keep the project Graphify code graph useful and up to date
+alwaysApply: true
+---
+
+# Graphify
+
+- Before editing code, use `.venv-graphify/bin/graphify query "<question>"` when `graphify-out/graph.json` exists to understand affected symbols, callers, dependencies, and relationships; use `explain` or `path` where useful, then verify the relevant source before editing.
+- After substantial code changes, run `.venv-graphify/bin/graphify update .` from the project root and report any failure.
+- The code graph is a navigation aid, not a source of truth. Use normal file search when the graph is incomplete, stale, or not applicable.
+- Keep `.env`, `secrets/`, user data, and virtual environments out of the graph. Do not send private data to an external semantic backend.
