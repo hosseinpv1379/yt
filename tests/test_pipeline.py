@@ -12,6 +12,50 @@ from app.pipeline import JobCancelled, _dub_group_slot, _fit_dub_speech, _synthe
 
 
 class PipelineTests(unittest.TestCase):
+    def test_translation_requests_english_only_for_specialist_terms_in_subtitle_and_dub(self):
+        response = SimpleNamespace(usage=None, choices=[SimpleNamespace(finish_reason='stop',
+            message=SimpleNamespace(refusal=None, content=json.dumps({'translations': {'0': 'از GPU استفاده کن'}})))])
+        create = Mock(return_value=response)
+        client = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=create)))
+        for for_dubbing in (False, True):
+            result, _ = _translate([{'start': 0, 'end': 2, 'text': 'use the GPU'}], '', client, 'test', for_dubbing=for_dubbing)
+            self.assertEqual(result[0]['text'], 'از GPU استفاده کن')
+            prompt = create.call_args.kwargs['messages'][0]['content']
+            self.assertIn('specialized domain-specific technical terms only', prompt)
+            self.assertIn('Translate ordinary nontechnical words naturally into Persian', prompt)
+
+    def test_dub_rewrite_keeps_english_terms_even_if_model_omits_them(self):
+        source = 'در این بخش از Machine Learning و GPU استفاده می‌کنیم'
+        answer = SimpleNamespace(usage=None, choices=[SimpleNamespace(finish_reason='stop',
+            message=SimpleNamespace(refusal=None, content=json.dumps({'text': 'از یادگیری ماشین و پردازنده استفاده می‌کنیم'}, ensure_ascii=False)))])
+        client = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=Mock(return_value=answer))))
+        rewritten, _ = _shorten_dub_text(client, 'test', source, 1000, 2000)
+        self.assertEqual(rewritten, source)
+        answer.choices[0].message.content = json.dumps({'text': 'از Machine Learning و GPU استفاده می‌کنیم'}, ensure_ascii=False)
+        rewritten, _ = _shorten_dub_text(client, 'test', source, 1000, 2000)
+        self.assertEqual(rewritten, 'از Machine Learning و GPU استفاده می‌کنیم')
+    def test_translation_keeps_neighboring_context_across_batches_and_retries(self):
+        def answer(**kwargs):
+            content = kwargs['messages'][1]['content']
+            rows = json.loads(content.split('Segments:\n', 1)[1])
+            result = {str(item['i']): 'ترجمه ' + item['text'] for item in rows}
+            if len(rows) == 40:
+                result.pop('1')
+            return SimpleNamespace(usage=None, choices=[SimpleNamespace(finish_reason='stop',
+                message=SimpleNamespace(refusal=None, content=json.dumps({'translations': result}, ensure_ascii=False)))])
+        create = Mock(side_effect=answer)
+        client = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=create)))
+        segments = [{'start': i, 'end': i + 0.75, 'text': f'phrase{i}'} for i in range(42)]
+        result, _ = _translate(segments, 'technical video', client, 'test')
+        self.assertEqual(len(result), 42)
+        self.assertEqual([(x['start'], x['end']) for x in result], [(x['start'], x['end']) for x in segments])
+        retry = create.call_args_list[1].kwargs['messages'][1]['content']
+        self.assertIn('phrase0', retry)
+        self.assertIn('ترجمه phrase0', retry)
+        following = create.call_args_list[2].kwargs['messages'][1]['content']
+        self.assertIn('phrase39', following)
+        self.assertIn('ترجمه phrase39', following)
+
     def test_translation_retries_only_missing_rows_and_preserves_timing(self):
         def answer(**kwargs):
             source = json.loads(kwargs['messages'][1]['content'].split('Segments:\n', 1)[1])

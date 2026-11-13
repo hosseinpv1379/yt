@@ -65,6 +65,7 @@ class ModelSettingsTests(unittest.IsolatedAsyncioTestCase):
             or_client, oa_client = object(), object()
             def run(command):
                 (root / 'audio' / 'part_000.mp3').touch()
+                (root / 'audio' / 'segments.csv').write_text('part_000.mp3,0.000000,2.000000\n')
             transcribe = Mock(return_value=([{'start': 0, 'end': 2, 'text': 'hello'}], 0.1))
             translate = Mock(return_value=([{'start': 0, 'end': 2, 'text': 'سلام'}], 0.2))
             dub = Mock(return_value=(root / 'dub.wav', None, 0.0))

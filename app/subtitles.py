@@ -101,13 +101,38 @@ def source_cues(segments: list[dict], raw_words, reference_text: str) -> tuple[l
                            'text': ' '.join(item['text'] for item in current)})
         return result, True
 
-    # A segment's words lack precise boundaries, so allocate its time proportionally.
+    # Recover complete word-timed segments individually. A single malformed or
+    # missing word elsewhere must not discard precise timestamps for the rest.
+    valid_words = []
+    for item in raw_words or []:
+        times = _valid_times(item)
+        text = str(_field(item, 'word', '') or '').strip()
+        if times and text:
+            valid_words.append({'word': text, 'start': times[0], 'end': times[1]})
+    valid_words.sort(key=lambda item: (item['start'], item['end']))
+    ordered_segments = sorted(segments, key=lambda item: item['start'])
+    assigned = [[] for _ in ordered_segments]
+    for word in valid_words:
+        midpoint = (word['start'] + word['end']) / 2
+        for index, segment in enumerate(ordered_segments):
+            if segment['start'] <= midpoint <= segment['end']:
+                assigned[index].append(word)
+                break
     result = []
-    for segment in sorted(segments, key=lambda item: item['start']):
+    all_precise = bool(ordered_segments)
+    for segment, candidates in zip(ordered_segments, assigned):
+        if candidates:
+            candidate_words = [{'text': item['word']} for item in candidates]
+            if _coverage(segment['text'], candidate_words):
+                timed, precise = source_cues([], candidates, segment['text'])
+                if precise:
+                    result.extend(timed)
+                    continue
+        all_precise = False
         result.extend(_spread_text(segment['text'], segment['start'], segment['end'],
                                    max_chars=MAX_SOURCE_CHARS, max_words=MAX_SOURCE_WORDS,
                                    max_seconds=MAX_SOURCE_SECONDS))
-    return result, False
+    return result, all_precise
 
 
 def _caption_parts(text: str) -> list[str]:
@@ -197,6 +222,8 @@ def caption_cues(segments: list[dict]) -> list[dict]:
     result = []
     for cue in sequential:
         start = max(cue['start'], result[-1]['end'] if result else 0.0)
-        end = max(cue['end'], start + MIN_CUE_SECONDS)
+        # Do not artificially lengthen a short utterance beyond the source
+        # interval; the duration here reflects speech, not a reading estimate.
+        end = max(cue['end'], start + 0.001)
         result.append({**cue, 'start': start, 'end': end})
     return result
