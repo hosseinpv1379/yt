@@ -154,6 +154,31 @@ def _state(context: ContextTypes.DEFAULT_TYPE) -> BotState:
     return context.application.bot_data["state"]
 
 
+async def _edit_query_screen(query, text: str, **kwargs) -> None:
+    """Edit text screens and update captions when a screen is attached to media."""
+    message = getattr(query, "message", None)
+    media_fields = ("photo", "video", "animation", "audio", "document", "voice", "video_note")
+    has_media = message and any(getattr(message, field, None) for field in media_fields)
+    if message and (getattr(message, "caption", None) is not None or has_media):
+        kwargs.pop("disable_web_page_preview", None)
+        if len(text) > 1024:
+            text = text[:1021] + "..."
+        await query.edit_message_caption(caption=text, **kwargs)
+        return
+    await query.edit_message_text(text, **kwargs)
+
+
+async def _show_screen(update: Update, text: str, **kwargs) -> None:
+    """Edit the active inline screen, or send a screen for a command/message flow."""
+    query = update.callback_query
+    if query:
+        await _edit_query_screen(query, text, **kwargs)
+        return
+    message = update.effective_message
+    if message:
+        await message.reply_text(text, **kwargs)
+
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user, message = update.effective_user, update.effective_message
     if not user or not message:
@@ -221,8 +246,11 @@ async def receive_link(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         await message.reply_text("لینک یوتیوب، اینستاگرام، تیک‌تاک، X، فیسبوک، ویمئو، آپارات، ساندکلاد یا تک‌آهنگ Spotify بفرست.", reply_markup=ui.back_keyboard())
         return
     if user.id in state.active or user.id in state.pending_by_user:
-        await message.reply_text("یک سفارش باز داری. وضعیت آن را ببین یا درخواست فعلی را لغو کن.",
-                                 reply_markup=InlineKeyboardMarkup([[ui.button("📦 وضعیت سفارش", "menu:status", style="primary")]]))
+        await message.reply_text("یک سفارش باز داری. وضعیت آن را ببین یا لغو کن.",
+            reply_markup=InlineKeyboardMarkup([
+                [ui.button("📦 وضعیت سفارش", "menu:status", style="primary")],
+                [ui.button("‹ بازگشت", "menu:home")],
+            ]))
         return
     if state.image_quotes.get(str(user.id), {}).get("confirming"):
         await message.reply_text("سفارش تصویر در حال ثبت است؛ چند لحظه صبر کن.")
@@ -230,7 +258,10 @@ async def receive_link(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 
     if not await state.database.has_accepted_terms(user.id):
         await message.reply_text("برای شروع، شرایط استفاده را بخوان و بپذیر؛ سپس لینک را دوباره بفرست.",
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("📜 شرایط استفاده", callback_data="terms:show")]]))
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("📜 شرایط استفاده", callback_data="terms:show")],
+                [ui.button("‹ بازگشت", "menu:home")],
+            ]))
         return
 
     progress = await message.reply_text("✨ نوع پردازش را انتخاب کن:")
@@ -243,18 +274,16 @@ async def receive_link(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     if source_type != "youtube":
         selection.download_source = source_type
         if source_type == "spotify":
-            text = ("🎵 دریافت آهنگ Spotify\n\nفایل از Spotify دانلود نمی‌شود؛ "
-                    "ربات یک نسخهٔ مشابه در YouTube جست‌وجو می‌کند و ممکن است نتیجه متفاوت باشد.\n\n"
-                    "با زدن دکمه، جست‌وجو و دریافت نسخهٔ مشابه شروع می‌شود.")
+            text = "🎵 دانلود آهنگ\nفایل از Spotify دریافت نمی‌شود؛ نسخهٔ مشابه از YouTube پیدا می‌شود. ممکن است نتیجه متفاوت باشد."
             keyboard = InlineKeyboardMarkup([
                 [ui.button("🔎 دریافت نسخهٔ مشابه MP3", f"dl:{token}:audio", style="primary")],
-                [ui.button("✕ لغو", f"order_cancel:{token}", style="danger")],
+                [ui.button("‹ بازگشت (لغو)", f"order_cancel:{token}", style="danger")],
             ])
         else:
             text = "📥 دانلود فایل\n\nنوع خروجی را انتخاب کن. این مسیر فقط دانلود است و هزینهٔ پردازش ندارد."
             keyboard = InlineKeyboardMarkup([
                 [ui.button("🎬 ویدیو", f"dl:{token}:video", style="primary"), ui.button("🎵 فایل صوتی MP3", f"dl:{token}:audio")],
-                [ui.button("✕ لغو", f"order_cancel:{token}", style="danger")],
+                [ui.button("‹ بازگشت (لغو)", f"order_cancel:{token}", style="danger")],
             ])
         await context.application.bot.edit_message_text(text, chat_id=selection.chat_id,
             message_id=selection.message_id, reply_markup=keyboard)
@@ -296,7 +325,7 @@ async def choose_download(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         state.pending_quality.pop(token, None)
         state.pending_by_user.pop(user.id, None)
         logger.exception("Could not persist download order %s", job_id)
-        await query.edit_message_text("ثبت درخواست دانلود ممکن نشد؛ لطفاً لینک را دوباره بفرست.")
+        await _edit_query_screen(query, "ثبت درخواست دانلود ممکن نشد؛ دوباره تلاش کن.", reply_markup=ui.back_keyboard())
         return
     job = DownloadJob(job_id, user.id, selection.chat_id, selection.url, selection.message_id,
                       Path(state.settings.work_dir) / job_id, kind, selection.download_source)
@@ -304,7 +333,7 @@ async def choose_download(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     state.pending_by_user.pop(user.id, None)
     state.active[user.id] = job
     await state.queue.put(job)
-    await query.edit_message_text("📥 درخواست دانلود در صف ثبت شد. برای لغو /cancel را بزن.")
+    await _edit_query_screen(query, "📥 درخواست دانلود در صف ثبت شد.", reply_markup=ui.job_keyboard(job.id))
 
 
 async def choose_mode(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -329,8 +358,10 @@ async def choose_mode(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     await query.answer()
     selection.mode = mode
     if mode == "dub":
-        await query.edit_message_text(
-            "🎙 روش دوبله را انتخاب کن:\n\nساده: سریع‌تر؛ صدای اصلی هنگام دوبله کم می‌شود و ممکن است شنیده شود.\n\nهوشمند: تفکیک تقریبی دیالوگ از صدای پس‌زمینه روی سرور؛ کندتر و بدون تضمین حذف کامل دیالوگ.",
+        await _edit_query_screen(query,
+            "🎙 روش دوبله را انتخاب کن:\n"
+            "ساده: سریع‌تر.\n"
+            "هوشمند: تلاش می‌کند صدای پس‌زمینه را بهتر حفظ کند.",
             reply_markup=InlineKeyboardMarkup([
                 [InlineKeyboardButton("🎧 دوبلهٔ ساده", callback_data=f"dubmode:{token}:simple")],
                 [InlineKeyboardButton("✨ دوبلهٔ هوشمند", callback_data=f"dubmode:{token}:smart")],
@@ -373,7 +404,7 @@ async def _probe_order(query, context, selection: PendingQuality, token: str) ->
     state = _state(context)
     selection.probing = True
     try:
-        await query.edit_message_text(_progress_text("بررسی کیفیت‌های موجود", 0))
+        await _edit_query_screen(query, _progress_text("بررسی کیفیت‌های موجود", 0))
         heights, duration = await asyncio.to_thread(get_video_details, selection.url, state.settings)
         if duration <= 0:
             raise RuntimeError("مدت ویدیو از یوتیوب دریافت نشد.")
@@ -383,8 +414,9 @@ async def _probe_order(query, context, selection: PendingQuality, token: str) ->
             state.pending_quality.pop(token, None)
             if state.pending_by_user.get(selection.user_id) == token:
                 state.pending_by_user.pop(selection.user_id, None)
-            await _safe_edit(context.application, selection,
-                             f"مدت ویدیو بیشتر از سقف {state.settings.video_max_minutes} دقیقه است. لینک کوتاه‌تری بفرست.")
+            await _edit_query_screen(query,
+                f"مدت ویدیو بیشتر از سقف {state.settings.video_max_minutes} دقیقه است. لینک کوتاه‌تری بفرست.",
+                reply_markup=ui.back_keyboard())
             return
         selection.duration_seconds = int(ceil(duration))
     except Exception:
@@ -394,8 +426,8 @@ async def _probe_order(query, context, selection: PendingQuality, token: str) ->
         state.pending_quality.pop(token, None)
         if state.pending_by_user.get(selection.user_id) == token:
             state.pending_by_user.pop(selection.user_id, None)
-        await _safe_edit(application=context.application, selection=selection,
-                         text="کیفیت‌های ویدیو دریافت نشد. لطفاً کمی بعد دوباره تلاش کن.")
+        await _edit_query_screen(query, "کیفیت‌های ویدیو دریافت نشد. کمی بعد دوباره تلاش کن.",
+                                 reply_markup=ui.back_keyboard())
         return
 
     if state.pending_quality.get(token) is not selection:
@@ -430,9 +462,12 @@ async def choose_quality(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         state.pending_quality.pop(token, None)
         state.pending_by_user.pop(user.id, None)
         await query.answer("برای ادامه، شرایط استفاده را بخوان و تأیید کن.", show_alert=True)
-        await query.edit_message_text(
+        await _edit_query_screen(query,
             "قبل از ادامه، شرایط استفاده را بخوان و تأیید کن.",
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("📜 مطالعه و پذیرش شرایط", callback_data="terms:show")]]),
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("📜 شرایط استفاده", callback_data="terms:show")],
+                [ui.button("‹ بازگشت", "menu:home")],
+            ]),
         )
         return
     if user.id in state.active:
@@ -455,7 +490,7 @@ async def choose_quality(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     package = next((p for p in packages if p["mode"] == mode and p["minutes"] >= minutes), None)
     package_note = f"\nبستهٔ قابل استفاده: {package['minutes']} دقیقه" if package else ""
     await query.answer()
-    await query.edit_message_text(
+    await _edit_query_screen(query,
         f"🧾 سفارش جدید  ·  ۳ از ۳\n\nخروجی: {mode_label} · کیفیت: {quality}\n"
         f"مدت قابل محاسبه: {minutes} دقیقه\nتعرفه: {rate:,} تومان در دقیقه\n"
         f"هزینه: {amount:,} تومان · موجودی: {balance:,} تومان{package_note}\n\n"
@@ -521,15 +556,18 @@ async def confirm_order(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     state.pending_by_user.pop(user.id, None)
     if balance is None:
         if package_id:
-            await query.edit_message_text("بسته منقضی شده یا دقیقهٔ کافی ندارد. لینک را دوباره بفرست و روش پرداخت دیگری انتخاب کن.")
+            await _edit_query_screen(query, "بسته معتبر نیست. سفارش را دوباره شروع کن.", reply_markup=ui.back_keyboard())
             return
         current = await state.database.get_wallet_balance(user.id)
         shortage = max(0, amount - current)
-        await query.edit_message_text(
+        await _edit_query_screen(query,
             f"موجودی کافی نیست.\nمدت ویدیو: {minutes} دقیقه\nهزینه: {amount:,} تومان\n"
             f"موجودی: {current:,} تومان · کسری: {shortage:,} تومان\n\n"
-            "برای شارژ، /charge مبلغ را بفرست؛ بعد لینک ویدیو را دوباره ارسال کن.",
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("💳 راهنمای شارژ کیف پول", callback_data="wallet:topup")]]),
+            "برای ادامه، کیف پول را شارژ کن و لینک را دوباره بفرست.",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("💳 شارژ کیف پول", callback_data="wallet:topup")],
+                [ui.button("‹ بازگشت", "menu:home")],
+            ]),
         )
         return
 
@@ -549,7 +587,7 @@ async def confirm_order(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     state.active[user.id] = job
     await state.queue.put(job)
     try:
-        await query.edit_message_text(
+        await _edit_query_screen(query,
             _progress_text("سفارش در صف پردازش قرار گرفت", 0)
             + f"\nخروجی: {mode_label} | کیفیت: {quality_label}"
             + (f"\nمصرف از بسته: {minutes} دقیقه · باقی‌مانده: {balance} دقیقه" if package_id else
@@ -572,7 +610,7 @@ async def back_to_mode(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     selection.mode = None
     selection.quoted_rate = 0
     await query.answer()
-    await query.edit_message_text(
+    await _edit_query_screen(query,
         "🎬 سفارش جدید  ·  ۱ از ۳\n\nنوع خروجی را انتخاب کن:",
         reply_markup=ui.mode_keyboard(token),
     )
@@ -589,7 +627,7 @@ async def back_to_quality(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         return
     selection.quoted_rate = 0
     await query.answer()
-    await query.edit_message_text("🎬 کیفیت ویدیو را انتخاب کن:", reply_markup=ui.quality_keyboard(token, selection.available_heights))
+    await _edit_query_screen(query, "🎬 کیفیت ویدیو را انتخاب کن:", reply_markup=ui.quality_keyboard(token, selection.available_heights))
 
 
 async def cancel_order_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -605,7 +643,7 @@ async def cancel_order_callback(update: Update, context: ContextTypes.DEFAULT_TY
     state.pending_quality.pop(token, None)
     state.pending_by_user.pop(user.id, None)
     await query.answer()
-    await query.edit_message_text("سفارش لغو شد. هر زمان خواستی لینک جدید بفرست.")
+    await _edit_query_screen(query, "سفارش لغو شد.", reply_markup=ui.back_keyboard())
 
 
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -695,7 +733,7 @@ async def cancel_job_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
         return
     job.cancel_event.set()
     await query.answer("درخواست لغو ثبت شد.")
-    await query.message.reply_text(_cancel_requested_text(job), reply_markup=ui.back_keyboard())
+    await _edit_query_screen(query, _cancel_requested_text(job), reply_markup=ui.back_keyboard("menu:status"))
 
 
 async def limits(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -741,12 +779,12 @@ async def pricing(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     dub = int(await state.database.get_setting(
         "price_dub_toman_per_minute", str(state.settings.default_dub_price_toman_per_minute)
     ))
-    await message.reply_text(
+    await _show_screen(update,
         "💎 تعرفه‌ها\n\n"
         f"📝 زیرنویس فارسی  ·  {subtitle:,} تومان / دقیقه\n"
         f"🎙 دوبلهٔ فارسی  ·  {dub:,} تومان / دقیقه\n\n"
-        "مدت ویدیو به دقیقهٔ کامل بعدی گرد می‌شود. هزینه را پیش از تأیید می‌بینی.",
-        reply_markup=ui.back_keyboard(),
+        "هزینهٔ نهایی پیش از تأیید نمایش داده می‌شود.",
+        reply_markup=ui.back_keyboard("menu:services" if update.callback_query else "menu:home"),
     )
 
 
@@ -759,7 +797,7 @@ async def balance(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         return
     await _state(context).database.upsert_user(user, True)
     amount = await _state(context).database.get_wallet_balance(user.id)
-    await message.reply_text(
+    await _show_screen(update,
         f"👛 موجودی کیف پول\n\n<b>{amount:,} تومان</b>", parse_mode="HTML",
         reply_markup=ui.wallet_keyboard(),
     )
@@ -779,7 +817,10 @@ async def charge_wallet(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     if not await state.database.has_accepted_terms(user.id):
         await message.reply_text(
             "قبل از درخواست شارژ، شرایط استفاده را بخوان و تأیید کن.",
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("📜 مطالعهٔ شرایط", callback_data="terms:show")]]),
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("📜 شرایط استفاده", callback_data="terms:show")],
+                [ui.button("‹ بازگشت", "menu:home")],
+            ]),
         )
         return
     if not context.args:
@@ -793,32 +834,38 @@ async def _prompt_topup(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     if not user or not message or message.chat.type != "private":
         return
     state = _state(context)
+    back_action = "wallet:balance" if update.callback_query else "menu:home"
     state.awaiting_support.discard(user.id)
     if not state.settings.card_to_card_number or not state.settings.card_to_card_holder:
-        await message.reply_text("شارژ در حال حاضر در دسترس نیست؛ لطفاً با پشتیبانی تماس بگیر.", reply_markup=ui.back_keyboard())
+        await _show_screen(update, "شارژ در حال حاضر در دسترس نیست؛ با پشتیبانی تماس بگیر.",
+                           reply_markup=ui.back_keyboard(back_action))
         return
     if not await state.database.has_accepted_terms(user.id):
-        await message.reply_text("برای شارژ، ابتدا شرایط استفاده را بخوان و بپذیر.",
-            reply_markup=InlineKeyboardMarkup([[ui.button("📜 مشاهدهٔ شرایط", "terms:show", style="primary")]]))
+        await _show_screen(update, "برای شارژ، شرایط استفاده را بخوان و بپذیر.",
+            reply_markup=InlineKeyboardMarkup([
+                [ui.button("📜 شرایط استفاده", "terms:show", style="primary")],
+                [ui.button("‹ بازگشت", back_action)],
+            ]))
         return
     pending = await state.database.get_user_pending_deposit(user.id)
     if pending:
         if pending["status"] == "awaiting_proof":
-            await message.reply_text(
-                f"💳 درخواست شارژ باز · {pending['amount_toman']:,} تومان\n\n"
+            await _show_screen(update,
+                f"💳 درخواست شارژ باز · {pending['amount_toman']:,} تومان\n"
                 f"شماره کارت: {state.settings.card_to_card_number}\n"
-                f"به نام: {state.settings.card_to_card_holder}\n\n"
-                "عکس رسید یا شمارهٔ پیگیری را بفرست. برای لغو /cancel را بزن.",
-                reply_markup=ui.back_keyboard())
+                f"به نام: {state.settings.card_to_card_holder}\n"
+                "رسید یا شمارهٔ پیگیری را بفرست.",
+                reply_markup=ui.back_keyboard(back_action))
         else:
-            await message.reply_text("⏳ رسیدت در حال بررسی است. پس از بررسی نتیجه را اطلاع می‌دهیم.", reply_markup=ui.back_keyboard())
+            await _show_screen(update, "⏳ رسیدت در حال بررسی است.",
+                               reply_markup=ui.back_keyboard(back_action))
         return
     state.awaiting_support.discard(user.id)
     state.awaiting_topup.add(user.id)
-    await message.reply_text(
-        f"💳 شارژ کیف پول\n\nمبلغ دلخواه را به تومان بفرست.\n"
-        f"حداقل شارژ: {state.settings.minimum_wallet_topup_toman:,} تومان\n\n"
-        "مثال: 200000\nبرای انصراف /cancel را بزن.", reply_markup=ui.back_keyboard())
+    await _show_screen(update,
+        f"💳 شارژ کیف پول\nمبلغ را به تومان بفرست.\n"
+        f"حداقل: {state.settings.minimum_wallet_topup_toman:,} تومان",
+        reply_markup=ui.back_keyboard(back_action))
 
 
 async def _create_charge_request(update: Update, context: ContextTypes.DEFAULT_TYPE, raw_amount: str) -> None:
@@ -833,7 +880,10 @@ async def _create_charge_request(update: Update, context: ContextTypes.DEFAULT_T
     if not await state.database.has_accepted_terms(user.id):
         state.awaiting_topup.discard(user.id)
         await message.reply_text("برای شارژ، ابتدا شرایط استفاده را بپذیر.",
-            reply_markup=InlineKeyboardMarkup([[ui.button("📜 مشاهدهٔ شرایط", "terms:show", style="primary")]]))
+            reply_markup=InlineKeyboardMarkup([
+                [ui.button("📜 شرایط استفاده", "terms:show", style="primary")],
+                [ui.button("‹ بازگشت", "wallet:balance")],
+            ]))
         return
     try:
         amount = int(raw_amount.strip().replace(",", "").replace("٬", ""))
@@ -861,13 +911,12 @@ async def _create_charge_request(update: Update, context: ContextTypes.DEFAULT_T
             await message.reply_text("یک رسید در حال بررسی داری؛ برای ایجاد درخواست تازه صبر کن تا مدیر نتیجه را اعلام کند.")
         return
     await message.reply_text(
-        "🏦 درخواست کارت‌به‌کارت\n\n"
+        "🏦 درخواست شارژ ثبت شد.\n"
         f"مبلغ: <b>{amount:,} تومان</b>\n"
         f"شماره کارت: <code>{state.settings.card_to_card_number}</code>\n"
         f"به نام: <b>{escape(state.settings.card_to_card_holder)}</b>\n\n"
-        "پس از واریز، عکس رسید یا شماره پیگیری را در همین چت بفرست. مدیر انتقال را دستی بررسی می‌کند و سپس کیف پول شارژ می‌شود.\n"
-        "این مرحله تأیید خودکار بانکی نیست؛ تا تأیید مدیر موجودی اضافه نخواهد شد.",
-        parse_mode="HTML", reply_markup=ui.back_keyboard(),
+        "پس از واریز، رسید را بفرست. پس از تأیید مدیر، کیف پول شارژ می‌شود.",
+        parse_mode="HTML", reply_markup=ui.back_keyboard("wallet:balance"),
     )
 
 
@@ -880,7 +929,7 @@ async def history(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         return
     rows = await _state(context).database.wallet_history(user.id)
     if not rows:
-        await message.reply_text("📒 هنوز تراکنشی ثبت نشده است.", reply_markup=ui.wallet_keyboard())
+        await _show_screen(update, "📒 هنوز تراکنشی ثبت نشده است.", reply_markup=ui.wallet_keyboard())
         return
     labels = {
         "card_transfer_deposit": "شارژ کارت‌به‌کارت",
@@ -898,25 +947,27 @@ async def history(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         elif "محتوای تکمیلی" in row['memo']:
             description = "محتوای تکمیلی" if row['amount_toman'] < 0 else "بازگشت هزینهٔ محتوای تکمیلی"
         lines.append(f"{row['created_at']:%Y-%m-%d %H:%M} · {description} · {sign}{row['amount_toman']:,} تومان")
-    await message.reply_text("\n".join(lines), reply_markup=ui.wallet_keyboard())
+    await _show_screen(update, "\n".join(lines), reply_markup=ui.wallet_keyboard())
 
 
 async def terms(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user, message = update.effective_user, update.effective_message
     if not user or not message:
         return
-    await message.reply_text(
+    await _show_screen(update,
         "📜 شرایط استفاده و حریم خصوصی\n\n"
-        "• هزینهٔ پردازش بر اساس مدت منبع و انتخاب کاربر از کیف پول یا بستهٔ دقیقه کم می‌شود.\n"
-        "• بستهٔ دقیقه برای نوع مشخص و مدت اعتبار اعلام‌شده است؛ در صورت خطای سفارش، دقیقهٔ مصرف‌شده بازمی‌گردد.\n"
-        "• خروجی‌های محتوای تکمیلی هوش مصنوعی ممکن است خطا داشته باشند و پیش از استفاده باید بررسی شوند.\n"
-        "• شارژ کارت‌به‌کارت پس از بررسی دستی رسید توسط مدیر به کیف پول اضافه می‌شود؛ ارسال رسید به‌تنهایی به معنی تأیید نیست.\n"
-        "• اگر پردازش یا تحویل خروجی به‌دلیل خطای سرویس ناموفق شود، مبلغ همان job به کیف پول برمی‌گردد.\n"
-        "• لینک و محتوای ویدیو برای دریافت، رونویسی و ترجمه نزد ارائه‌دهندگان فنی پردازش می‌شود. متن زیرنویس و خروجی‌های تکمیلی در دیتابیس ذخیره می‌شوند؛ فایل‌های موقت پس از پردازش پاک و لینک‌های خروجی پس از مهلت اعلام‌شده حذف می‌شوند.\n"
-        "• فقط محتوایی را ارسال کن که حق استفاده و پردازش آن را داری و قوانین محل استفاده‌ات را رعایت کن.\n"
-        "• پشتیبانی: /paysupport · گردش کیف پول: /history\n\n"
-        "با انتخاب «می‌پذیرم»، شرایط بالا را تأیید می‌کنی.",
-        reply_markup=InlineKeyboardMarkup([[ui.button("✓ می‌پذیرم", "terms:accept", style="success")], [ui.button("⌂ منوی اصلی", "menu:home")]]),
+        "• هزینه پیش از تأیید نمایش داده می‌شود.\n"
+        "• در صورت خطای پردازش، هزینه به کیف پول برمی‌گردد.\n"
+        "• شارژ کارت‌به‌کارت پس از بررسی رسید توسط مدیر انجام می‌شود.\n"
+        "• بسته‌ها برای نوع مشخص‌اند و مدت اعتبار دارند.\n"
+        "• لینک ویدیو برای پردازش به سرویس‌های فنی فرستاده می‌شود. متن زیرنویس و خروجی‌ها ذخیره می‌شوند.\n"
+        "• خروجی هوش مصنوعی را پیش از استفاده بررسی کن.\n"
+        "• فقط محتوایی را بفرست که اجازهٔ استفاده از آن را داری.\n\n"
+        "با انتخاب «می‌پذیرم»، شرایط را تأیید می‌کنی.",
+        reply_markup=InlineKeyboardMarkup([
+            [ui.button("✓ می‌پذیرم", "terms:accept", style="success")],
+            [ui.button("‹ بازگشت", "menu:home")],
+        ]),
     )
 
 
@@ -935,10 +986,9 @@ async def payment_support(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     state.awaiting_topup.discard(user.id)
     state.awaiting_support.add(user.id)
     contact = f"@{state.settings.support_username}" if state.settings.support_username else "مدیر ربات"
-    await message.reply_text(
-        f"💬 پشتیبانی\n\nپیامت را همین‌جا بنویس تا برای پشتیبانی ارسال شود.\n"
-        f"راه ارتباطی: {contact}\nبرای انصراف /cancel را بزن.",
-        reply_markup=ui.back_keyboard())
+    await _show_screen(update,
+        f"💬 پشتیبانی\nپیامت را همین‌جا بنویس.\nراه ارتباطی: {contact}",
+        reply_markup=ui.back_keyboard("menu:support" if update.callback_query else "menu:home"))
 
 
 async def _send_support_request(update: Update, context: ContextTypes.DEFAULT_TYPE, detail: str) -> None:
@@ -1030,7 +1080,7 @@ async def _show_model_settings(query, state: BotState) -> None:
         "این فقط سناریوی نمونه است؛ بازنویسی، تلاش مجدد، سکوت و تغییر نرخ می‌توانند هزینه را تغییر دهند. مدل ناشناخته یا OpenAI Realtime بدون نرخ قابل‌اتکای دقیقه‌ای، نامشخص نمایش داده می‌شود.",
         "انتخاب‌ها برای سفارش‌های بعدی اعمال می‌شوند.",
     ])
-    await query.edit_message_text("\n".join(lines), reply_markup=InlineKeyboardMarkup([
+    await _edit_query_screen(query, "\n".join(lines), reply_markup=InlineKeyboardMarkup([
         [ui.button("🎧 مدل رونویسی", "admin:model:stt"), ui.button("🌐 مدل ترجمه", "admin:model:translation")],
         [ui.button("🎙 مدل تولید صدا", "admin:model:tts"), ui.button("🗣 صدای گوینده", "admin:voices")],
         [ui.button("‹ پنل مدیریت", "admin:refresh")],
@@ -1056,7 +1106,7 @@ async def _show_model_options(query, state: BotState, stage: str) -> None:
         lines.append("برآورد نمونهٔ Gemini: ۶۰ ثانیه صدای تولیدشده (۲۵ توکن در ثانیه) و ۳۰۰ توکن متن ورودی. مدت صدا با ویدیو یکسان نیست و تکرار تولید هزینه را بیشتر می‌کند.")
         lines.append("برای OpenAI تبدیل قابل‌اتکای دقیقه‌ای در دسترس نیست؛ هزینه با توکن محاسبه می‌شود.")
     buttons.append([ui.button("‹ مدل‌ها", "admin:models")])
-    await query.edit_message_text("\n".join(lines), reply_markup=InlineKeyboardMarkup(buttons))
+    await _edit_query_screen(query, "\n".join(lines), reply_markup=InlineKeyboardMarkup(buttons))
 
 
 async def _show_voice_options(query, state: BotState) -> None:
@@ -1066,7 +1116,7 @@ async def _show_voice_options(query, state: BotState) -> None:
     buttons = [ui.button(f"{'✓ ' if name == selection.voice else ''}{name}",
                          f"admin:voice:{provider}:{name}", style="success" if name == selection.voice else None)
                for name in voices]
-    await query.edit_message_text(
+    await _edit_query_screen(query,
         f"🗣 صدای دوبله · {_provider_label(provider)}\nمدل: {selection.tts.model}\n"
         "صدا بر اساس مدل انتخاب‌شده نمایش داده می‌شود؛ کیفیت فارسی را با ویدیوی نمونه بررسی کن.",
         reply_markup=InlineKeyboardMarkup([buttons[i:i + 2] for i in range(0, len(buttons), 2)] + [[ui.button("‹ مدل‌ها", "admin:models")]]),
@@ -1091,7 +1141,7 @@ async def admin_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                    for option in image_generation.MODELS]
         buttons += [[ui.button("✏️ قیمت ساخت", "admin:imageprice"), ui.button("✏️ قیمت ویرایش", "admin:imageeditprice")], [ui.button("‹ پنل مدیریت", "admin:refresh")]]
         rates = "\n".join(f"{item.model} · {_provider_label(item.provider)}: {item.price_hint}" for item in image_generation.MODELS)
-        await query.edit_message_text(f"🎨 تنظیم تولید تصویر\n\nمدل: {model.model}\nساخت: {price:,} تومان · ویرایش: {edit_price:,} تومان (صفر = غیرفعال)\n\n{rates}\n\nهزینهٔ بهینه‌سازی و عکس ورودی جداگانه به هزینهٔ API افزوده می‌شود. نرخ‌ها تقریبی‌اند؛ قیمت و دسترسی را بررسی کن.", reply_markup=InlineKeyboardMarkup(buttons))
+        await _edit_query_screen(query, f"🎨 تنظیم تولید تصویر\n\nمدل: {model.model}\nساخت: {price:,} تومان · ویرایش: {edit_price:,} تومان (صفر = غیرفعال)\n\n{rates}\n\nهزینهٔ بهینه‌سازی و عکس ورودی جداگانه به هزینهٔ API افزوده می‌شود. نرخ‌ها تقریبی‌اند؛ قیمت و دسترسی را بررسی کن.", reply_markup=InlineKeyboardMarkup(buttons))
         return
     if len(action) == 3 and action[1] == "imagemodel":
         option = image_generation.BY_CODE.get(action[2])
@@ -1100,21 +1150,21 @@ async def admin_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             return
         await state.database.set_setting("image_model", option.code)
         await query.answer("مدل تصویر ذخیره شد.")
-        await query.edit_message_text(f"✅ مدل تصویر برای سفارش‌های بعدی: {option.model}", reply_markup=InlineKeyboardMarkup([[ui.button("‹ تنظیم تصویر", "admin:images")]]))
+        await _edit_query_screen(query, f"✅ مدل تصویر برای سفارش‌های بعدی: {option.model}", reply_markup=InlineKeyboardMarkup([[ui.button("‹ تنظیم تصویر", "admin:images")]]))
         return
     if action == ["admin", "imageprice"]:
         state.admin_editing[user.id] = "image_price"
         await query.answer()
-        await query.edit_message_text("قیمت فروش هر تصویر را به تومان بفرست؛ صفر سرویس را غیرفعال می‌کند. لغو: /cancel")
+        await _edit_query_screen(query, "قیمت فروش هر تصویر را به تومان بفرست؛ صفر سرویس را غیرفعال می‌کند. لغو: /cancel")
         return
     if action == ["admin", "imageeditprice"]:
         state.admin_editing[user.id] = "image_edit_price"
         await query.answer()
-        await query.edit_message_text("قیمت ویرایش هر تصویر را به تومان بفرست؛ صفر ویرایش را غیرفعال می‌کند. لغو: /cancel")
+        await _edit_query_screen(query, "قیمت ویرایش هر تصویر را به تومان بفرست؛ صفر ویرایش را غیرفعال می‌کند. لغو: /cancel")
         return
     if action == ["admin", "packages"]:
         await query.answer()
-        await query.edit_message_text("🎟 تنظیم بسته‌ها\n\nبرای هر نوع، دقیقه، قیمت تومان و روز اعتبار را وارد کن؛ صفر برای غیرفعال‌سازی.",
+        await _edit_query_screen(query, "🎟 تنظیم بسته‌ها\n\nبرای هر نوع، دقیقه، قیمت تومان و روز اعتبار را وارد کن؛ صفر برای غیرفعال‌سازی.",
             reply_markup=InlineKeyboardMarkup([
                 [ui.button("📝 بستهٔ زیرنویس", "admin:package:subtitle"), ui.button("🎙 بستهٔ دوبله", "admin:package:dub")],
                 [ui.button("‹ پنل مدیریت", "admin:refresh")],
@@ -1123,13 +1173,13 @@ async def admin_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     if len(action) == 3 and action[1] == "package" and action[2] in {"subtitle", "dub"}:
         state.admin_editing[user.id] = f"package_{action[2]}"
         await query.answer()
-        await query.edit_message_text("سه عدد دقیقه، قیمت تومان و روز اعتبار را با فاصله بفرست؛ نمونه: 100 400000 30\nبرای غیرفعال‌سازی عدد 0 و برای لغو /cancel را بزن.")
+        await _edit_query_screen(query, "سه عدد دقیقه، قیمت تومان و روز اعتبار را با فاصله بفرست؛ نمونه: 100 400000 30\nبرای غیرفعال‌سازی عدد 0 و برای لغو /cancel را بزن.")
         return
     if action == ["admin", "contentprices"]:
         summary = await state.database.get_setting("content_price_summary", "0")
         social = await state.database.get_setting("content_price_social", "0")
         await query.answer()
-        await query.edit_message_text(
+        await _edit_query_screen(query,
             f"📝 قیمت محتوای تکمیلی\n\nخلاصه و جزوه: {int(summary):,} تومان\n"
             f"بستهٔ تولید محتوا: {int(social):,} تومان\n\nعدد صفر یعنی سرویس غیرفعال است.",
             reply_markup=InlineKeyboardMarkup([
@@ -1140,7 +1190,7 @@ async def admin_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     if len(action) == 3 and action[1] == "contentprice" and action[2] in {"summary", "social"}:
         state.admin_editing[user.id] = f"content_{action[2]}"
         await query.answer()
-        await query.edit_message_text("قیمت ثابت هر سفارش را به تومان بفرست؛ عدد ۰ سرویس را غیرفعال می‌کند. لغو: /cancel")
+        await _edit_query_screen(query, "قیمت ثابت هر سفارش را به تومان بفرست؛ عدد ۰ سرویس را غیرفعال می‌کند. لغو: /cancel")
         return
     if action == ["admin", "models"]:
         await query.answer()
@@ -1180,21 +1230,21 @@ async def admin_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     if len(action) == 3 and action[1] == "edit" and action[2] in {"subtitle", "dub"}:
         state.admin_editing[user.id] = action[2]
         await query.answer()
-        await query.edit_message_text("نرخ جدید را به تومان برای هر دقیقه بفرست. لغو: /cancel")
+        await _edit_query_screen(query, "نرخ جدید را به تومان برای هر دقیقه بفرست. لغو: /cancel")
         return
     if action == ["admin", "wallet", "credit"] or action == ["admin", "wallet", "debit"]:
         state.admin_editing[user.id] = action[2]
         await query.answer()
-        await query.edit_message_text("شناسهٔ عددی تلگرام و مبلغ تومان را بفرست؛ نمونه: 123456789 500000\nلغو: /cancel")
+        await _edit_query_screen(query, "شناسهٔ عددی تلگرام و مبلغ تومان را بفرست؛ نمونه: 123456789 500000\nلغو: /cancel")
         return
     if action == ["admin", "wallet", "lookup"]:
         state.admin_editing[user.id] = "lookup"
         await query.answer()
-        await query.edit_message_text("شناسهٔ عددی تلگرام کاربر را بفرست؛ لغو: /cancel")
+        await _edit_query_screen(query, "شناسهٔ عددی تلگرام کاربر را بفرست؛ لغو: /cancel")
         return
     if action == ["admin", "providers"]:
         await query.answer()
-        await query.edit_message_text(
+        await _edit_query_screen(query,
             f"پردازشگر فعلی: {_provider_label(state.api_provider)}",
             reply_markup=InlineKeyboardMarkup([[
                 InlineKeyboardButton("OpenAI", callback_data="provider:openai"),
@@ -1214,7 +1264,7 @@ async def admin_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         return
     if action == ["admin", "refresh"]:
         await query.answer()
-        await query.edit_message_text("در حال به‌روزرسانی…")
+        await _edit_query_screen(query, "در حال به‌روزرسانی…")
         await _show_admin_panel(query.message.reply_text, state, user.id)
         return
     await query.answer("دکمه منقضی شده است.", show_alert=True)
@@ -1331,7 +1381,7 @@ async def terms_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     elif action == "terms:accept":
         await state.database.accept_terms(user.id)
         await query.answer("شرایط پذیرفته شد.")
-        await query.edit_message_text("✅ شرایط استفاده ثبت شد. حالا لینک ویدیو را بفرست.")
+        await _edit_query_screen(query, "✅ شرایط ثبت شد. حالا لینک ویدیو را بفرست.", reply_markup=ui.back_keyboard())
 
 
 async def menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -1340,38 +1390,40 @@ async def menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         return
     action = (query.data or "").partition(":")[2]
     await query.answer()
-    _state(context).awaiting_image_prompt.discard(user.id)
-    _state(context).image_references.pop(user.id, None)
-    if not _state(context).image_quotes.get(str(user.id), {}).get("confirming"):
-        _state(context).image_quotes.pop(str(user.id), None)
-    if action != "support":
-        _state(context).awaiting_support.discard(user.id)
-        _state(context).awaiting_topup.discard(user.id)
+    state = _state(context)
+    state.awaiting_image_prompt.discard(user.id)
+    state.image_references.pop(user.id, None)
+    state.subtitle_editing.pop(user.id, None)
+    if not state.image_quotes.get(str(user.id), {}).get("confirming"):
+        state.image_quotes.pop(str(user.id), None)
+    if action != "contact":
+        state.awaiting_support.discard(user.id)
+    state.awaiting_topup.discard(user.id)
     if action == "home":
-        await start(update, context)
+        state.subtitle_editing.pop(user.id, None)
+        await state.database.upsert_user(user, True)
+        balance = await state.database.get_wallet_balance(user.id)
+        await _edit_query_screen(query, ui.home_text(balance), parse_mode="HTML", reply_markup=ui.home_keyboard())
     elif action == "new":
-        _state(context).awaiting_topup.discard(user.id)
-        _state(context).awaiting_support.discard(user.id)
-        state = _state(context)
         if user.id in state.active or user.id in state.pending_by_user:
-            await query.message.reply_text(
-                "یک سفارش باز داری. ابتدا آن را تکمیل یا لغو کن.",
-                reply_markup=InlineKeyboardMarkup([[ui.button("📦 وضعیت سفارش", "menu:status", style="primary")],
-                                                  [ui.button("⌂ منوی اصلی", "menu:home")]]))
+            await _edit_query_screen(query, "یک سفارش باز داری. وضعیت آن را ببین یا لغو کن.",
+                reply_markup=InlineKeyboardMarkup([
+                    [ui.button("📦 وضعیت سفارش", "menu:status", style="primary")],
+                    [ui.button("‹ بازگشت", "menu:home")],
+                ]))
             return
-        await query.message.reply_text(
-            "🎬 سفارش جدید\n\nلینک یوتیوب یا رسانهٔ شبکه‌های اجتماعی را همین‌جا بفرست.\n"
-            f"حداکثر مدت ویدیو: {_state(context).settings.video_max_minutes} دقیقه.",
-            reply_markup=ui.back_keyboard())
+        await _edit_query_screen(query, "🎬 سفارش جدید\nلینک ویدیو یا آهنگ را همین‌جا بفرست.",
+                                      reply_markup=ui.back_keyboard())
+    elif action == "services":
+        await _edit_query_screen(query, "✨ خدمات\nیکی از گزینه‌ها را انتخاب کن:", reply_markup=ui.services_keyboard())
     elif action == "pricing":
         await pricing(update, context)
     elif action == "status":
-        state = _state(context)
         if user.id in state.active:
             job = state.active[user.id]
             label = ("دانلود" if isinstance(job, DownloadJob) else "ساخت تصویر" if isinstance(job, ImageJob) else "محتوای تکمیلی" if isinstance(job, ContentJob) else
                      "زیرنویس" if job.mode == "subtitle" else "دوبله")
-            await query.message.reply_text(
+            await _edit_query_screen(query,
                 f"📦 سفارش فعال\n\nنوع: {label}\nشمارهٔ سفارش: {job.id[:8]}\n"
                 + ((_progress_text(job.progress_stage, job.progress_percent) + "\nدرصد تقریبی مراحل پردازش است.")
                    if isinstance(job, Job) else "وضعیت در پیام سفارش نمایش داده می‌شود.")
@@ -1379,14 +1431,22 @@ async def menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
                 reply_markup=ui.job_keyboard(job.id, cancellable=not isinstance(job, (Job, ImageJob)) or not job.delivery_started))
         elif user.id in state.pending_by_user:
             token = state.pending_by_user[user.id]
-            await query.message.reply_text("📦 سفارش هنوز در مرحلهٔ انتخاب است. به پیام انتخاب برگرد یا آن را لغو کن.",
-                reply_markup=InlineKeyboardMarkup([[ui.button("✕ لغو انتخاب", f"order_cancel:{token}", style="danger")],
-                                                  [ui.button("⌂ منوی اصلی", "menu:home")]]))
+            await _edit_query_screen(query, "📦 سفارش هنوز در مرحلهٔ انتخاب است. آن را ادامه بده یا لغو کن.",
+                reply_markup=InlineKeyboardMarkup([
+                    [ui.button("✕ لغو انتخاب", f"order_cancel:{token}", style="danger")],
+                    [ui.button("‹ بازگشت", "menu:home")],
+                ]))
         else:
-            await query.message.reply_text("📦 سفارش فعالی نداری. برای شروع لینک یوتیوب را بفرست.", reply_markup=ui.home_keyboard())
+            await _edit_query_screen(query, "📦 سفارش فعالی نداری.", reply_markup=InlineKeyboardMarkup([
+                [ui.button("🎬 سفارش جدید", "menu:new", style="primary")],
+                [ui.button("‹ بازگشت", "menu:home")],
+            ]))
     elif action == "canceljob":
-        await query.message.reply_text("برای لغو، وضعیت سفارش فعلی را باز کن.",
-            reply_markup=InlineKeyboardMarkup([[ui.button("📦 وضعیت سفارش", "menu:status", style="primary")]]))
+        await _edit_query_screen(query, "برای لغو، وضعیت سفارش را باز کن.",
+            reply_markup=InlineKeyboardMarkup([
+                [ui.button("📦 وضعیت سفارش", "menu:status", style="primary")],
+                [ui.button("‹ بازگشت", "menu:home")],
+            ]))
     elif action == "team":
         await team_command(update, context)
     elif action == "history":
@@ -1394,16 +1454,20 @@ async def menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     elif action == "terms":
         await terms(update, context)
     elif action == "support":
+        await _edit_query_screen(query, "💬 پشتیبانی\nچطور می‌توانیم کمکت کنیم؟", reply_markup=ui.support_keyboard())
+    elif action == "contact":
         await payment_support(update, context)
     elif action == "help":
-        await query.message.reply_text(
-            "📖 راهنما\n\nلینک یوتیوب را بفرست و خروجی و کیفیت را انتخاب کن. "
-            "پیش از پرداخت، مبلغ نمایش داده می‌شود. در صورت خطای پردازش، هزینه به کیف پول برمی‌گردد.\n\n"
-            "برای توقف سفارش از /cancel استفاده کن.",
+        await _edit_query_screen(query,
+            "📖 راهنما\nلینک را بفرست، خروجی را انتخاب کن و هزینه را پیش از تأیید ببین.\n"
+            "در صورت خطای پردازش، هزینه برمی‌گردد.",
             reply_markup=InlineKeyboardMarkup([
-                [ui.button("🎬 سفارش جدید", "menu:new", style="primary")],
-                [ui.button("📜 شرایط استفاده", "menu:terms"), ui.button("⌂ منوی اصلی", "menu:home")],
+                [ui.button("✉️ ارسال پیام", "menu:contact", style="primary")],
+                [ui.button("📜 شرایط استفاده", "menu:terms")],
+                [ui.button("‹ بازگشت", "menu:support")],
             ]))
+    else:
+        await _edit_query_screen(query, "این بخش در دسترس نیست.", reply_markup=ui.back_keyboard())
 
 
 
@@ -1485,7 +1549,7 @@ async def deposit_action(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         if query.message and (query.message.photo or query.message.document):
             await query.edit_message_caption(caption=f"✅ تأیید شد · {result['amount_toman']:,} تومان برای {result['user_id']} شارژ شد.")
         else:
-            await query.edit_message_text(f"✅ تأیید شد · {result['amount_toman']:,} تومان برای {result['user_id']} شارژ شد.")
+            await _edit_query_screen(query, f"✅ تأیید شد · {result['amount_toman']:,} تومان برای {result['user_id']} شارژ شد.")
         try:
             await context.application.bot.send_message(
                 result["chat_id"],
@@ -1502,7 +1566,7 @@ async def deposit_action(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         if query.message and (query.message.photo or query.message.document):
             await query.edit_message_caption(caption="❌ درخواست شارژ رد شد؛ در صورت اشتباه با /paysupport پیگیری کن.")
         else:
-            await query.edit_message_text("❌ درخواست شارژ رد شد؛ در صورت اشتباه با /paysupport پیگیری کن.")
+            await _edit_query_screen(query, "❌ درخواست شارژ رد شد؛ در صورت اشتباه با /paysupport پیگیری کن.")
         try:
             await context.application.bot.send_message(result["chat_id"], "درخواست شارژ تأیید نشد. اگر انتقال را انجام داده‌ای، با /paysupport شمارهٔ پیگیری را بفرست.")
         except TelegramError:
@@ -1583,7 +1647,7 @@ async def choose_provider_callback(update: Update, context: ContextTypes.DEFAULT
     await state.database.set_setting("api_provider", provider)
     state.api_provider = provider
     await query.answer("سرویس تغییر کرد.")
-    await query.edit_message_text(
+    await _edit_query_screen(query,
         f"سرویس برای jobهای بعدی روی {_provider_label(provider)} تنظیم شد."
     )
 
@@ -1667,12 +1731,7 @@ async def orders_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     action = parts[1] if len(parts) > 1 else ""
     if action == "home":
         await query.answer()
-        await query.message.reply_text("📦 سفارش‌های من\n\nنوع سفارش را انتخاب کن:", reply_markup=InlineKeyboardMarkup([
-            [ui.button("🎬 زیرنویس و دوبله", "orders:list:processing:0", style="primary")],
-            [ui.button("📥 دانلود فایل", "orders:list:download:0"), ui.button("📝 محتوای تکمیلی", "orders:list:content:0")],
-            [ui.button("🎨 سفارش‌های تصویر", "image:history:0")],
-            [ui.button("⏳ سفارش فعال", "menu:status"), ui.button("⌂ منوی اصلی", "menu:home")],
-        ]))
+        await _edit_query_screen(query, "📦 سفارش‌های من\nنوع سفارش را انتخاب کن:", reply_markup=ui.orders_keyboard())
         return
     if action == "list" and len(parts) == 4 and parts[2] in ORDER_CATEGORIES:
         category = parts[2]
@@ -1696,9 +1755,9 @@ async def orders_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             navigation.append(ui.button("بعدی ›", f"orders:list:{category}:{page + 1}"))
         if navigation:
             buttons.append(navigation)
-        buttons.append([ui.button("‹ دسته‌ها", "orders:home")])
+        buttons.append([ui.button("‹ بازگشت", "orders:home")])
         text = f"📦 {ORDER_CATEGORIES[category]} · صفحهٔ {page + 1}\n\n" + ("سفارشی پیدا نشد." if not rows else "برای مشاهدهٔ جزئیات، یک سفارش را انتخاب کن.")
-        await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(buttons))
+        await _edit_query_screen(query, text, reply_markup=InlineKeyboardMarkup(buttons))
         return
     if action == "detail" and len(parts) == 5 and parts[2] in ORDER_CATEGORIES:
         category, order_id = parts[2], parts[3]
@@ -1745,9 +1804,9 @@ async def orders_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             buttons.append([ui.button("⬇️ دریافت خروجی", f"content:result:{order_id}", style="primary")])
         if category == "processing" and order['status'] == "completed":
             buttons.append([ui.button("📝 خروجی‌های تکمیلی و ویرایش", f"content:job:{order_id}")])
-        buttons.append([ui.button("‹ فهرست سفارش‌ها", f"orders:list:{category}:{page}")])
+        buttons.append([ui.button("‹ بازگشت", f"orders:list:{category}:{page}")])
         await query.answer()
-        await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(buttons), disable_web_page_preview=True)
+        await _edit_query_screen(query, text, reply_markup=InlineKeyboardMarkup(buttons), disable_web_page_preview=True)
         return
     await query.answer("گزینهٔ نامعتبر است.", show_alert=True)
 
@@ -1782,9 +1841,9 @@ async def packages_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) 
                 minutes, price, days = plan
                 lines.append(f"\n{label}: {minutes} دقیقه · {price:,} تومان · اعتبار {days} روز")
                 buttons.append([ui.button(f"خرید بستهٔ {label}", f"packs:quote:{mode}")])
-        lines.append("\nخرید از کیف پول فعلی انجام می‌شود. بسته‌ها با هم تجمیع نمی‌شوند و فقط برای نوع انتخابی قابل استفاده‌اند.")
-        buttons.append([ui.button("⌂ منوی اصلی", "menu:home")])
-        await query.message.reply_text("\n".join(lines), reply_markup=InlineKeyboardMarkup(buttons))
+        lines.append("\nهزینه از کیف پول کم می‌شود.")
+        buttons.append([ui.button("‹ بازگشت", "menu:services")])
+        await _edit_query_screen(query, "\n".join(lines), reply_markup=InlineKeyboardMarkup(buttons))
         return
     if action == "quote" and len(parts) == 3 and parts[2] in {"subtitle", "dub"}:
         mode = parts[2]
@@ -1796,10 +1855,10 @@ async def packages_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         token = uuid.uuid4().hex[:12]
         state.package_quotes[token] = (user.id, mode, minutes, price, days)
         await query.answer()
-        await query.edit_message_text(f"🧾 بستهٔ {'زیرنویس' if mode == 'subtitle' else 'دوبله'}\n"
+        await _edit_query_screen(query, f"🧾 بستهٔ {'زیرنویس' if mode == 'subtitle' else 'دوبله'}\n"
             f"{minutes} دقیقه · {price:,} تومان · اعتبار {days} روز از زمان خرید\n\n"
             "با تأیید، مبلغ از کیف پول کم می‌شود. در سفارش بعدی می‌توانی پرداخت از بسته را انتخاب کنی.",
-            reply_markup=InlineKeyboardMarkup([[ui.button("✓ تأیید خرید", f"packs:buy:{token}", style="success")], [ui.button("‹ بسته‌ها", "packs:list")]]))
+            reply_markup=InlineKeyboardMarkup([[ui.button("✓ تأیید خرید", f"packs:buy:{token}", style="success")], [ui.button("‹ بازگشت", "packs:list")]]))
         return
     if action == "buy" and len(parts) == 3:
         quote = state.package_quotes.get(parts[2])
@@ -1817,7 +1876,8 @@ async def packages_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             await query.answer("موجودی کافی نیست یا بسته معتبر نیست.", show_alert=True)
             return
         await query.answer()
-        await query.edit_message_text(f"✅ بستهٔ {minutes} دقیقه‌ای فعال شد؛ اعتبار {days} روز. در خلاصهٔ سفارش می‌توانی استفاده از بسته را انتخاب کنی.", reply_markup=ui.back_keyboard())
+        await _edit_query_screen(query, f"✅ بستهٔ {minutes} دقیقه‌ای فعال شد؛ اعتبار {days} روز.",
+                                      reply_markup=ui.back_keyboard("menu:services"))
         return
     await query.answer("گزینهٔ نامعتبر است.", show_alert=True)
 
@@ -1835,14 +1895,12 @@ async def team_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         header += f"نقش شما: {role}\n\n"
     else:
         header = "👥 هنوز عضو تیمی نیستی.\n\n"
-    await message.reply_text(header +
-        "ساخت تیم: /team_create نام تیم\n"
-        "ساخت دعوت یک‌بارمصرف مدیر: /team_invite\n"
-        "پیوستن: /team_join کد\n"
-        "خروج عضو: /team_leave\n"
-        "مدیر: /team_glossary اصطلاح | معادل\n"
-        "مدیر: /team_report و /team_remove شناسه\n\n"
-        "هر عضو از کیف پول خودش استفاده می‌کند. با پیوستن، مدیر آمار تعداد و مدت سفارش‌های بعدی شما را می‌بیند؛ محتوای سفارش‌ها به اشتراک گذاشته نمی‌شود.", reply_markup=ui.back_keyboard())
+    await _show_screen(update, header +
+        "ساخت تیم: /team_create نام\n"
+        "دعوت: /team_invite · پیوستن: /team_join کد\n"
+        "خروج: /team_leave\n\n"
+        "هر عضو کیف پول خودش را دارد.",
+        reply_markup=ui.back_keyboard("menu:support" if update.callback_query else "menu:home"))
 
 
 async def team_create(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -1886,8 +1944,11 @@ async def team_join(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         return
     await message.reply_text(
         f"👥 دعوت به تیم {invite['name']}\nمدیر: {invite['owner_id']}\n\n"
-        "با پیوستن، مدیر تعداد و مدت سفارش‌های موفق آیندهٔ تو را می‌بیند و واژه‌نامهٔ تیم برای ترجمه استفاده می‌شود. کیف پول و محتوای سفارش‌ها مستقل‌اند.",
-        reply_markup=InlineKeyboardMarkup([[ui.button("✓ پذیرش دعوت", f"team:join:{token}", style="success")], [ui.button("⌂ منوی اصلی", "menu:home")]]))
+        "مدیر تعداد و مدت سفارش‌های آینده را می‌بیند. کیف پول و محتوای سفارش‌ها مستقل می‌مانند.",
+        reply_markup=InlineKeyboardMarkup([
+            [ui.button("✓ پذیرش دعوت", f"team:join:{token}", style="success")],
+            [ui.button("‹ بازگشت", "menu:home")],
+        ]))
 
 
 async def team_join_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -1899,7 +1960,7 @@ async def team_join_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
     texts = {"joined": "✅ به تیم پیوستی. آمار سفارش‌های بعدی برای مدیر تیم قابل مشاهده است؛ کیف پول مستقل می‌ماند.",
              "member": "ابتدا از تیم فعلی خارج شو.", "full": "ظرفیت تیم کامل است.", "invalid": "دعوت معتبر نیست یا منقضی شده است."}
     await query.answer()
-    await query.edit_message_text(texts[result], reply_markup=ui.back_keyboard())
+    await _edit_query_screen(query, texts[result], reply_markup=ui.back_keyboard())
 
 
 async def team_remove(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -2001,10 +2062,10 @@ async def _receive_image_prompt(update: Update, context: ContextTypes.DEFAULT_TY
 
 def _image_quote_text(quote: dict) -> str:
     labels = {"1:1": "مربع", "2:3": "عمودی", "3:2": "افقی"}
-    return (f"🎨 {'ویرایش تصویر مرجع' if quote.get('reference') else 'ساخت یک تصویر'}\n\nدرخواست: {quote['prompt']}\n\n"
+    return (f"🎨 {'ویرایش تصویر' if quote.get('reference') else 'ساخت تصویر'}\n"
+            f"درخواست: {quote['prompt']}\n"
             f"ابعاد: {labels[quote['aspect']]} · هزینه: {quote['price']:,} تومان\n"
-            "درخواست پیش از ساخت بهینه می‌شود. پس از تأیید هزینه از کیف پول کم می‌شود؛ "
-            "در صورت ناموفق‌بودن ساخت، هزینه برگشت داده می‌شود.")
+            "با تأیید، هزینه کم می‌شود و در صورت خطا برمی‌گردد.")
 
 
 def _image_quote_keyboard(token: str, aspect: str) -> InlineKeyboardMarkup:
@@ -2014,6 +2075,7 @@ def _image_quote_keyboard(token: str, aspect: str) -> InlineKeyboardMarkup:
         [ui.button("✓ تأیید و ساخت تصویر", f"image:buy:{token}", style="success")],
         [ui.button("✏️ تغییر توضیح", f"image:revise:{token}")],
         [ui.button("✕ لغو", f"image:cancel:{token}", style="danger")],
+            [ui.button("‹ بازگشت به خدمات", "menu:services")],
     ])
 
 
@@ -2033,7 +2095,10 @@ async def image_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             return
         if not await state.database.has_accepted_terms(user.id):
             await query.answer("ابتدا شرایط استفاده را بپذیر.", show_alert=True)
-            await query.message.reply_text("برای استفاده ابتدا شرایط را بپذیر.", reply_markup=InlineKeyboardMarkup([[ui.button("📜 شرایط", "terms:show")]]))
+            await _edit_query_screen(query, "برای استفاده، شرایط را بخوان و بپذیر.", reply_markup=InlineKeyboardMarkup([
+                [ui.button("📜 شرایط استفاده", "terms:show", style="primary")],
+                [ui.button("‹ بازگشت", "menu:services")],
+            ]))
             return
         if (int(await state.database.get_setting("image_price", "0")) <= 0
                 and int(await state.database.get_setting("image_edit_price", "0")) <= 0):
@@ -2046,7 +2111,8 @@ async def image_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         state.image_references.pop(user.id, None)
         state.awaiting_image_prompt.add(user.id)
         await query.answer()
-        await query.message.reply_text("🎨 ساخت یا ویرایش تصویر\n\nبرای ساخت، توضیح تصویر را بفرست. برای ویرایش، ابتدا عکس PNG، JPEG یا WebP تا ۱۰ مگابایت را بفرست و سپس تغییرات را بنویس؛ می‌توانی توضیح را در کپشن عکس هم بنویسی. برای کیفیت اصلی عکس را به‌صورت فایل بفرست.\n\nمتن و عکس پس از تأیید برای سرویس هوش مصنوعی ارسال و در سفارش ذخیره می‌شوند. پیش از کسر هزینه، قیمت و ابعاد را می‌بینی. لغو: /cancel", reply_markup=ui.back_keyboard())
+        await _edit_query_screen(query, "🎨 ساخت تصویر\nمتن تصویر را بفرست. برای ویرایش، عکس را بفرست و بعد تغییر موردنظر را بنویس.\nقیمت را پیش از تأیید می‌بینی.",
+                                      reply_markup=ui.back_keyboard("menu:services"))
         return
     if action == "history":
         state.awaiting_image_prompt.discard(user.id)
@@ -2065,11 +2131,11 @@ async def image_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             navigation.append(ui.button("بعدی ›", f"image:history:{page + 1}"))
         if navigation:
             buttons.append(navigation)
-        buttons.append([ui.button("⌂ منوی اصلی", "menu:home")])
+        buttons.append([ui.button("‹ بازگشت", "orders:home")])
         await query.answer()
         labels = {"queued": "در صف", "completed": "آماده", "refunded": "ناموفق، بازپرداخت‌شده"}
         listing = "\n".join(f"• {row['id'][:8]} · {labels.get(row['status'], row['status'])} · {row['amount']:,} تومان" for row in rows[:5])
-        await query.edit_message_text(("🖼 سفارش‌های تصویر\n\n" + listing + "\n\nبرای دریافت تصویر آماده دکمهٔ آن را بزن.") if rows else "🖼 در این صفحه سفارشی وجود ندارد.", reply_markup=InlineKeyboardMarkup(buttons))
+        await _edit_query_screen(query, ("🖼 سفارش‌های تصویر\n\n" + listing + "\n\nبرای دریافت تصویر آماده دکمهٔ آن را بزن.") if rows else "🖼 در این صفحه سفارشی وجود ندارد.", reply_markup=InlineKeyboardMarkup(buttons))
         return
     if action == "remix" and len(parts) == 3:
         if user.id in state.active or user.id in state.pending_by_user or state.image_quotes.get(str(user.id), {}).get("confirming"):
@@ -2089,7 +2155,8 @@ async def image_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         state.image_references[user.id] = (saved["image"], saved["media_type"])
         state.awaiting_image_prompt.add(user.id)
         await query.answer()
-        await query.message.reply_text("🖌 توضیح بده چه تغییری در همین تصویر می‌خواهی. هر ویرایش یک سفارش جداست و قبل از تأیید قیمت نمایش داده می‌شود.", reply_markup=ui.back_keyboard())
+        await _edit_query_screen(query, "🖌 تغییر موردنظرت را بنویس. قیمت را پیش از تأیید می‌بینی.",
+                                      reply_markup=ui.back_keyboard("orders:home"))
         return
     if action == "get" and len(parts) == 3:
         saved = await state.database.owned_image(user.id, parts[2])
@@ -2098,6 +2165,7 @@ async def image_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             return
         await query.answer()
         await _send_generated_image(context.application, user.id, saved["image"], saved["media_type"], parts[2])
+        await _edit_query_screen(query, "✅ تصویر ارسال شد.", reply_markup=ui.back_keyboard("image:history:0"))
         return
     quote = state.image_quotes.get(str(user.id))
     if len(parts) < 3 or not quote or quote["token"] != parts[2] or quote.get("confirming"):
@@ -2106,7 +2174,7 @@ async def image_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     if action == "cancel":
         state.image_quotes.pop(str(user.id), None)
         await query.answer()
-        await query.edit_message_text("سفارش تصویر لغو شد.", reply_markup=ui.back_keyboard())
+        await _edit_query_screen(query, "سفارش تصویر لغو شد.", reply_markup=ui.back_keyboard("menu:services"))
         return
     if action == "revise":
         reference = quote.get("reference")
@@ -2115,12 +2183,12 @@ async def image_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             state.image_references[user.id] = reference
         state.awaiting_image_prompt.add(user.id)
         await query.answer()
-        await query.edit_message_text("✏️ توضیح کامل جدیدت را بفرست. عکس مرجع، اگر انتخاب کرده باشی، حفظ می‌شود.", reply_markup=ui.back_keyboard())
+        await _edit_query_screen(query, "✏️ توضیح جدید را بفرست.", reply_markup=ui.back_keyboard("menu:services"))
         return
     if action == "aspect" and len(parts) == 5 and ":".join(parts[3:]) in {"1:1", "2:3", "3:2"}:
         quote["aspect"] = ":".join(parts[3:])
         await query.answer()
-        await query.edit_message_text(_image_quote_text(quote), reply_markup=_image_quote_keyboard(parts[2], quote["aspect"]))
+        await _edit_query_screen(query, _image_quote_text(quote), reply_markup=_image_quote_keyboard(parts[2], quote["aspect"]))
         return
     if action != "buy" or len(parts) != 3:
         await query.answer("انتخاب معتبر نیست.", show_alert=True)
@@ -2154,7 +2222,7 @@ async def image_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         state.active[user.id] = job
         await state.queue.put(job)
         await query.answer("سفارش ثبت شد.")
-        await query.edit_message_text("🎨 سفارش تصویر در صف قرار گرفت.", reply_markup=ui.job_keyboard(job.id))
+        await _edit_query_screen(query, "🎨 سفارش تصویر در صف قرار گرفت.", reply_markup=ui.job_keyboard(job.id))
     finally:
         quote["confirming"] = False
 
@@ -2165,7 +2233,8 @@ async def _send_generated_image(application, chat_id: int, data: bytes, media_ty
     document.name = f"image-{order_id[:8]}.{ext}"
     await application.bot.send_document(chat_id, document, caption=f"🎨 تصویر سفارش {order_id[:8]} · فایل با کیفیت اصلی",
         reply_markup=InlineKeyboardMarkup([[ui.button("🖌 ویرایش این تصویر", f"image:remix:{order_id}", style="primary")],
-                                           [ui.button("🖼 تصاویر من", "image:history:0")]]))
+                                           [ui.button("🖼 تصاویر من", "image:history:0")],
+                                           [ui.button("‹ بازگشت", "orders:home")]]))
 
 
 async def _run_image_job(application: Application, state: BotState, job: ImageJob) -> None:
@@ -2216,14 +2285,15 @@ async def content_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         rows = await state.database.recent_completed_jobs(user.id)
         await query.answer()
         if not rows:
-            await query.message.reply_text("هنوز سفارش تکمیل‌شده‌ای با زیرنویس نداری.", reply_markup=ui.back_keyboard())
+            await _edit_query_screen(query, "هنوز سفارش تکمیل‌شده‌ای نداری.", reply_markup=ui.back_keyboard("menu:services"))
             return
         buttons = [[ui.button(f"{'دوبله' if row['mode'] == 'dub' else 'زیرنویس'} · {row['id'][:8]} · {row['created_at']:%Y-%m-%d}",
                                f"content:job:{row['id']}")] for row in rows]
-        buttons.append([ui.button("⌂ منوی اصلی", "menu:home")])
-        await query.message.reply_text("📝 سفارش موردنظر را انتخاب کن:", reply_markup=InlineKeyboardMarkup(buttons))
+        buttons.append([ui.button("‹ بازگشت", "menu:services")])
+        await _edit_query_screen(query, "📝 سفارش را انتخاب کن:", reply_markup=InlineKeyboardMarkup(buttons))
         return
     if action == "job" and len(parts) == 3:
+        state.subtitle_editing.pop(user.id, None)
         job_id = parts[2]
         if not await state.database.owned_subtitle(job_id, user.id):
             await query.answer("سفارش پیدا نشد.", show_alert=True)
@@ -2239,7 +2309,7 @@ async def content_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -
             buttons.append([ui.button(f"⬇️ دریافت دوبارهٔ {label} · {result['created_at']:%Y-%m-%d}", f"content:result:{result['id']}")])
         buttons.append([ui.button("‹ سفارش‌ها", "content:list")])
         await query.answer()
-        await query.edit_message_text(f"📝 خروجی‌های سفارش {job_id[:8]}\n\nیکی از گزینه‌ها را انتخاب کن.",
+        await _edit_query_screen(query, f"📝 خروجی‌های سفارش {job_id[:8]}\n\nیکی از گزینه‌ها را انتخاب کن.",
                                       reply_markup=InlineKeyboardMarkup(buttons))
         return
     if action == "result" and len(parts) == 3:
@@ -2250,7 +2320,9 @@ async def content_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         data = BytesIO(saved["text"].encode("utf-8"))
         data.name = "summary-fa.txt" if saved["kind"] == "summary" else "content-pack-fa.txt"
         await query.answer()
-        await query.message.reply_document(data, caption="خروجی ذخیره‌شدهٔ سفارش شما")
+        await query.message.reply_document(data, caption="خروجی ذخیره‌شدهٔ سفارش شما",
+            reply_markup=InlineKeyboardMarkup([[ui.button("‹ بازگشت", "content:list")]]))
+        await _edit_query_screen(query, "✅ فایل خروجی ارسال شد.", reply_markup=ui.back_keyboard("content:list"))
         return
     if action == "edit" and len(parts) == 3:
         job_id = parts[2]
@@ -2261,7 +2333,11 @@ async def content_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         state.subtitle_editing[user.id] = job_id
         data = BytesIO(subtitle.encode("utf-8")); data.name = "fa.srt"
         await query.answer()
-        await query.message.reply_document(data, caption="فایل فعلی را ببین و شمارهٔ بخش و متن جدید را در یک خط بفرست؛ نمونه: 12 متن اصلاح‌شده\nبرای لغو /cancel را بزن. تغییر فقط در فایل SRT جدید اعمال می‌شود.")
+        await query.message.reply_document(data,
+            caption="فایل فعلی را ببین و اصلاح را با شمارهٔ بخش و متن جدید بفرست. نمونه: 12 متن اصلاح‌شده",
+            reply_markup=InlineKeyboardMarkup([[ui.button("‹ بازگشت", f"content:job:{job_id}")]]))
+        await _edit_query_screen(query, "📎 فایل زیرنویس ارسال شد. شمارهٔ بخش و متن جدید را بفرست.",
+                                 reply_markup=ui.back_keyboard(f"content:job:{job_id}"))
         return
     if action == "quote" and len(parts) == 4 and parts[2] in {"summary", "social"}:
         kind, job_id = parts[2], parts[3]
@@ -2276,7 +2352,7 @@ async def content_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         state.content_quotes[token] = (user.id, job_id, kind, price)
         label = "خلاصه و جزوه" if kind == "summary" else "بستهٔ تولید محتوا"
         await query.answer()
-        await query.edit_message_text(f"🧾 {label}\nهزینه: {price:,} تومان\n\nبا تأیید، هزینه از کیف پول کم می‌شود؛ در صورت خطا بازگردانده می‌شود.",
+        await _edit_query_screen(query, f"🧾 {label}\nهزینه: {price:,} تومان\n\nبا تأیید، هزینه از کیف پول کم می‌شود؛ در صورت خطا بازگردانده می‌شود.",
             reply_markup=InlineKeyboardMarkup([[ui.button("✓ تأیید و شروع", f"content:buy:{token}", style="success")], [ui.button("‹ بازگشت", f"content:job:{job_id}")]]))
         return
     if action == "buy" and len(parts) == 3:
@@ -2311,7 +2387,8 @@ async def content_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         await state.queue.put(job)
         try:
             await query.answer()
-            await query.edit_message_text("📝 درخواست ثبت شد و در صف پردازش قرار گرفت. لغو: /cancel")
+            await _edit_query_screen(query, "📝 درخواست ثبت شد و در صف پردازش است.",
+                                     reply_markup=ui.job_keyboard(job.id))
         except TelegramError:
             logger.exception("Could not acknowledge content order %s", order_id)
         return

@@ -9,27 +9,50 @@ def button(text: str, action: str, *, style: str | None = None) -> InlineKeyboar
 def home_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [button('🎬 سفارش جدید', 'menu:new', style='primary')],
-        [button('🎨 ساخت تصویر با هوش مصنوعی', 'image:start', style='primary')],
-        [button('🖼 تصاویر من', 'image:history:0')],
-        [button('⏳ وضعیت سفارش فعال', 'menu:status')],
-        [button('👛 کیف پول', 'wallet:balance'), button('💎 تعرفه‌ها', 'menu:pricing')],
-        [button('📦 سفارش‌های من', 'orders:home', style='primary'), button('📒 گردش حساب', 'menu:history')],
-        [button('📝 خروجی‌های تکمیلی و ویرایش', 'content:list', style='primary')],
+        [button('📦 سفارش‌های من', 'orders:home', style='primary')],
+        [button('👛 کیف پول', 'wallet:balance')],
+        [button('✨ خدمات', 'menu:services')],
+        [button('💬 پشتیبانی', 'menu:support')],
+    ])
+
+
+def services_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [button('🎨 ساخت تصویر', 'image:start', style='primary')],
+        [button('📝 خلاصه و محتوای تکمیلی', 'content:list')],
         [button('🎟 بسته‌های دقیقه', 'packs:list')],
-        [button('👥 تیم', 'menu:team'), button('💬 پشتیبانی', 'menu:support')],
-        [button('📖 راهنما و شرایط', 'menu:help')],
+        [button('💎 تعرفه‌ها', 'menu:pricing')],
+        [button('‹ بازگشت', 'menu:home')],
+    ])
+
+
+def support_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [button('✉️ ارسال پیام', 'menu:contact', style='primary')],
+        [button('📖 راهنما', 'menu:help')],
+        [button('📜 شرایط استفاده', 'menu:terms')],
+        [button('👥 تیم', 'menu:team')],
+        [button('‹ بازگشت', 'menu:home')],
+    ])
+
+
+def orders_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [button('🎬 زیرنویس و دوبله', 'orders:list:processing:0', style='primary')],
+        [button('📥 دانلود فایل', 'orders:list:download:0')],
+        [button('📝 محتوای تکمیلی', 'orders:list:content:0')],
+        [button('🎨 سفارش‌های تصویر', 'image:history:0')],
+        [button('⏳ سفارش فعال', 'menu:status')],
+        [button('‹ بازگشت', 'menu:home')],
     ])
 
 
 def home_text(balance: int) -> str:
     return (
         '🎬 <b>ویدیو فارسی</b>\n'
-        'زیرنویس و دوبلهٔ یوتیوب · دانلود رسانه از شبکه‌های اجتماعی\n\n'
-        '۱  لینک ویدیو یا آهنگ را بفرست\n'
-        '۲  نوع خروجی را انتخاب کن\n'
-        '۳  سفارش پردازش را تأیید کن یا دانلود را شروع کن\n\n'
-        f'👛 موجودی شما: <b>{balance:,} تومان</b>\n'
-        'برای شروع، لینک را همین‌جا بفرست یا از منوی زیر استفاده کن.'
+        'زیرنویس، دوبله و دانلود ویدیو\n\n'
+        'لینک را بفرست یا از منو انتخاب کن.\n'
+        f'👛 موجودی: <b>{balance:,} تومان</b>'
     )
 
 
@@ -37,7 +60,7 @@ def mode_keyboard(token: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [button('📝 زیرنویس فارسی', f'mode:{token}:subtitle', style='primary')],
         [button('🎙 دوبلهٔ فارسی', f'mode:{token}:dub')],
-        [button('✕ لغو سفارش', f'order_cancel:{token}', style='danger')],
+        [button('‹ بازگشت (لغو سفارش)', f'order_cancel:{token}', style='danger')],
     ])
 
 
@@ -64,17 +87,18 @@ def confirmation_keyboard(token: str, package_id: str | None = None) -> InlineKe
 def wallet_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [button('➕ شارژ کیف پول', 'wallet:topup', style='success')],
-        [button('📒 گردش حساب', 'menu:history'), button('⌂ منوی اصلی', 'menu:home')],
+        [button('📒 گردش حساب', 'menu:history')],
+        [button('‹ بازگشت', 'menu:home')],
     ])
 
 
-def back_keyboard() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup([[button('⌂ منوی اصلی', 'menu:home')]])
+def back_keyboard(action: str = 'menu:home') -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([[button('‹ بازگشت', action)]])
 
 
 def job_keyboard(job_id: str, *, cancellable: bool = True) -> InlineKeyboardMarkup:
     rows = []
     if cancellable:
         rows.append([button('✕ لغو این سفارش', f'job_cancel:{job_id}', style='danger')])
-    rows.append([button('📦 سفارش‌های من', 'orders:home'), button('⌂ منوی اصلی', 'menu:home')])
+    rows.append([button('📦 سفارش‌های من', 'orders:home'), button('‹ بازگشت', 'menu:home')])
     return InlineKeyboardMarkup(rows)
