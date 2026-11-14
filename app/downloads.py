@@ -378,6 +378,21 @@ def _normalize_instagram_image_extension(path: Path) -> Path:
     return corrected
 
 
+def _set_yt_dlp_default_outtmpl(ydl, template: str) -> None:
+    """Change yt-dlp's default output template without undoing its normalization.
+
+    Recent yt-dlp versions normalize ``outtmpl`` into a mapping keyed by the
+    output type (usually ``default``). Replacing that mapping with a string
+    makes ``prepare_filename`` fail when processing Instagram carousel entries.
+    Preserve any other configured output types while updating the default.
+    """
+    outtmpl = ydl.params.get("outtmpl")
+    if isinstance(outtmpl, dict):
+        outtmpl["default"] = template
+    else:
+        ydl.params["outtmpl"] = {"default": template}
+
+
 def _download_instagram_media(url: str, directory: Path, settings, cancel_event, progress=None) -> tuple[Path, str]:
     if not is_instagram_media_url(url):
         raise RuntimeError("لینک باید مربوط به یک پست، ریلز، استوری یا هایلایت اینستاگرام باشد.")
@@ -472,7 +487,7 @@ def _download_instagram_media(url: str, directory: Path, settings, cancel_event,
             before = set(directory.glob("media-*"))
             formats = item.get("formats") or []
             if formats:
-                ydl.params["outtmpl"] = str(directory / f"media-{index:03d}.%(ext)s")
+                _set_yt_dlp_default_outtmpl(ydl, str(directory / f"media-{index:03d}.%(ext)s"))
                 try:
                     ydl.process_ie_result(item, download=True)
                 except JobCancelled:

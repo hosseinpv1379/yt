@@ -60,6 +60,10 @@ class CaptionLanguageFlowTests(unittest.IsolatedAsyncioTestCase):
                         await module.callback(update, context)
                         query.data = "vclip:color:abcd:yellow"
                         await module.callback(update, context)
+                        query.data = "vclip:font:abcd:vazirmatn"
+                        await module.callback(update, context)
+                        query.data = "vclip:size:abcd:medium"
+                        await module.callback(update, context)
                         query.data = "vclip:confirm:abcd"
                         await module.callback(update, context)
                         job = state.queue.get_nowait()

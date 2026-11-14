@@ -48,6 +48,7 @@ class JobRecord(Base):
     )
     chat_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
     source_url: Mapped[str] = mapped_column(Text, nullable=False)
+    title: Mapped[str | None] = mapped_column(String(255), nullable=True)
     mode: Mapped[str] = mapped_column(String(12), nullable=False, default="subtitle")
     api_provider: Mapped[str] = mapped_column(String(12), nullable=False, default="openai")
     selected_height: Mapped[int | None] = mapped_column(nullable=True)
@@ -293,6 +294,7 @@ class Database:
             ))
             await connection.execute(text("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS package_id VARCHAR(32)"))
             await connection.execute(text("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS package_minutes INTEGER"))
+            await connection.execute(text("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS title VARCHAR(255)"))
             await connection.execute(text("ALTER TABLE content_orders ADD COLUMN IF NOT EXISTS api_cost_usd NUMERIC(12, 8)"))
             await connection.execute(text("ALTER TABLE image_orders ADD COLUMN IF NOT EXISTS reference_image BYTEA"))
             await connection.execute(text("ALTER TABLE image_orders ADD COLUMN IF NOT EXISTS reference_media_type VARCHAR(32)"))
@@ -626,7 +628,8 @@ class Database:
 
     async def create_package_job(self, job_id: str, user_id: int, chat_id: int, url: str,
                                  selected_height: int | None, mode: str, api_provider: str,
-                                 billable_minutes: int, package_id: str) -> int | None:
+                                 billable_minutes: int, package_id: str,
+                                 title: str | None = None) -> int | None:
         if billable_minutes < 1:
             return None
         async with self.sessions.begin() as session:
@@ -637,7 +640,8 @@ class Database:
                 return None
             package.remaining_minutes -= billable_minutes
             session.add(JobRecord(id=job_id, telegram_user_id=user_id, chat_id=chat_id,
-                source_url=url, mode=mode, api_provider=api_provider, selected_height=selected_height,
+                source_url=url, title=title[:255] if title else None,
+                mode=mode, api_provider=api_provider, selected_height=selected_height,
                 status="queued", billable_minutes=billable_minutes, billed_amount_toman=0,
                 package_id=package.id, package_minutes=billable_minutes))
             return package.remaining_minutes
@@ -766,8 +770,21 @@ class Database:
             rows = (await session.scalars(select(model).where(owner == user_id)
                 .order_by(model.created_at.desc(), model.id.desc()).offset(max(0, offset)).limit(limit))).all()
             return [{"id": row.id, "status": row.status, "created_at": row.created_at,
+                     "title": getattr(row, "title", None),
+                     "source_url": getattr(row, "source_url", None),
                      "kind": ("caption_video" if row.source_url == "telegram-upload" else row.mode)
                      if category == "processing" else row.kind} for row in rows]
+
+    async def update_job_title_if_missing(self, user_id: int, job_id: str, title: str) -> bool:
+        clean_title = title[:255].strip()
+        if not clean_title:
+            return False
+        async with self.sessions.begin() as session:
+            result = await session.execute(JobRecord.__table__.update().where(
+                JobRecord.id == job_id, JobRecord.telegram_user_id == user_id,
+                JobRecord.title.is_(None),
+            ).values(title=clean_title))
+            return result.rowcount == 1
 
     async def get_owned_order(self, user_id: int, category: str, order_id: str) -> dict | None:
         if category == "processing":
@@ -786,7 +803,7 @@ class Database:
                       "kind": ("caption_video" if row.source_url == "telegram-upload" else row.mode)
                       if category == "processing" else row.kind}
             if category == "processing":
-                result.update(source_url=row.source_url, minutes=row.billable_minutes,
+                result.update(source_url=row.source_url, title=row.title, minutes=row.billable_minutes,
                               amount=row.billed_amount_toman, package_minutes=row.package_minutes)
                 links = (await session.scalars(select(DownloadRecord).where(DownloadRecord.job_id == order_id)
                     .order_by(DownloadRecord.created_at.desc()).limit(10))).all()
@@ -962,7 +979,7 @@ class Database:
     async def create_wallet_job(
         self, job_id: str, user_id: int, chat_id: int, url: str,
         selected_height: int | None, mode: str, api_provider: str,
-        billable_minutes: int, amount_toman: int,
+        billable_minutes: int, amount_toman: int, title: str | None = None,
     ) -> int | None:
         async with self.sessions.begin() as session:
             user = await session.scalar(
@@ -973,7 +990,8 @@ class Database:
             user.wallet_balance_toman -= amount_toman
             session.add(JobRecord(
                 id=job_id, telegram_user_id=user_id, chat_id=chat_id,
-                source_url=url, mode=mode, api_provider=api_provider,
+                source_url=url, title=title[:255] if title else None,
+                mode=mode, api_provider=api_provider,
                 selected_height=selected_height, status="queued",
                 billable_minutes=billable_minutes, billed_amount_toman=amount_toman,
             ))

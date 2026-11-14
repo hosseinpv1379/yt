@@ -9,6 +9,7 @@ from datetime import UTC, datetime, timedelta
 from html import escape
 from math import ceil
 from pathlib import Path
+from urllib.parse import parse_qs, urlparse
 
 from openai import RateLimitError
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
@@ -31,7 +32,8 @@ from .pipeline import (
     OpenAICost,
     cleanup,
     cleanup_expired_downloads,
-    get_video_details,
+    get_public_youtube_title,
+    get_video_details_with_title,
     process_video,
     publish_download,
     publish_subtitle_player,
@@ -125,6 +127,7 @@ class PendingQuality:
     api_provider: str
     mode: str | None = None
     duration_seconds: int = 0
+    video_title: str = ""
     selected_height: int | None = None
     quoted_rate: int = 0
     confirming: bool = False
@@ -427,7 +430,9 @@ async def _probe_order(query, context, selection: PendingQuality, token: str) ->
     selection.probing = True
     try:
         await _edit_query_screen(query, _progress_text("بررسی کیفیت‌های موجود", 0))
-        heights, duration = await asyncio.to_thread(get_video_details, selection.url, state.settings)
+        heights, duration, title = await asyncio.to_thread(
+            get_video_details_with_title, selection.url, state.settings
+        )
         if duration <= 0:
             raise RuntimeError("مدت ویدیو از یوتیوب دریافت نشد.")
         if duration > state.settings.video_max_minutes * 60:
@@ -441,6 +446,7 @@ async def _probe_order(query, context, selection: PendingQuality, token: str) ->
                 reply_markup=ui.back_keyboard())
             return
         selection.duration_seconds = int(ceil(duration))
+        selection.video_title = title
     except Exception:
         logger.exception("Could not probe YouTube formats for Telegram user %s", selection.user_id)
         if state.pending_quality.get(token) is not selection:
@@ -564,12 +570,13 @@ async def confirm_order(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
             balance = await state.database.create_package_job(
                 job_id=job_id, user_id=user.id, chat_id=selection.chat_id, url=selection.url,
                 selected_height=selected_height, mode=mode, api_provider=selection.api_provider,
-                billable_minutes=minutes, package_id=package_id)
+                billable_minutes=minutes, package_id=package_id, title=selection.video_title)
         else:
             balance = await state.database.create_wallet_job(
                 job_id=job_id, user_id=user.id, chat_id=selection.chat_id,
                 url=selection.url, selected_height=selected_height, mode=mode,
-                api_provider=selection.api_provider, billable_minutes=minutes, amount_toman=amount)
+                api_provider=selection.api_provider, billable_minutes=minutes, amount_toman=amount,
+                title=selection.video_title)
 
     except Exception:
         selection.confirming = False
@@ -1752,6 +1759,89 @@ ORDER_STATUS = {"queued": "در صف", "running": "در حال پردازش", "c
                 "refunded": "ناموفق؛ بازپرداخت‌شده"}
 
 
+def _truncate_button_text(value: str, max_units: int = 64) -> str:
+    """Keep Telegram inline button labels within its UTF-16 length limit."""
+    value = re.sub(r"\s+", " ", value).strip()
+    if len(value.encode("utf-16-le")) // 2 <= max_units:
+        return value
+    budget = max(0, max_units - 1)
+    result = []
+    units = 0
+    for char in value:
+        char_units = len(char.encode("utf-16-le")) // 2
+        if units + char_units > budget:
+            break
+        result.append(char)
+        units += char_units
+    return "".join(result).rstrip() + "…"
+
+
+def _stable_order_source(url: str) -> str:
+    try:
+        parsed = urlparse(url)
+        host = (parsed.hostname or "").lower()
+        parts = [part for part in parsed.path.split("/") if part]
+        video_id = ""
+        if host in {"youtu.be", "www.youtu.be"} and parts:
+            video_id = parts[0]
+        elif host == "youtube.com" or host.endswith(".youtube.com"):
+            video_id = (parse_qs(parsed.query).get("v") or [""])[0]
+            if not video_id and len(parts) >= 2 and parts[0] in {"shorts", "live", "embed"}:
+                video_id = parts[1]
+        if re.fullmatch(r"[A-Za-z0-9_-]{6,20}", video_id):
+            return f"YouTube · {video_id}"
+    except (TypeError, ValueError):
+        pass
+    return url
+
+
+async def _hydrate_order_titles(rows: list[dict], database: Database, user_id: int) -> None:
+    """Backfill missing titles from public YouTube metadata, without cookies."""
+    async def hydrate(row: dict) -> None:
+        url = row.get("source_url")
+        if row.get("title") or not url or url == "telegram-upload":
+            return
+        try:
+            host = (urlparse(url).hostname or "").lower()
+        except ValueError:
+            return
+        if not (host == "youtube.com" or host.endswith(".youtube.com")
+                or host == "youtu.be" or host.endswith(".youtu.be")):
+            return
+        try:
+            title = await asyncio.wait_for(
+                asyncio.to_thread(get_public_youtube_title, url), timeout=4
+            )
+        except Exception:
+            logger.debug("Could not hydrate title for historical order %s", row["id"])
+            return
+        if not title:
+            return
+        row["title"] = title
+        try:
+            await database.update_job_title_if_missing(user_id, row["id"], title)
+        except Exception:
+            logger.debug("Could not cache title for historical order %s", row["id"])
+
+    await asyncio.gather(*(hydrate(row) for row in rows))
+
+
+def _order_button_label(row: dict, category: str) -> str:
+    status = ORDER_STATUS.get(row["status"], "نامشخص")
+    order_id = row["id"][:8]
+    title = re.sub(r"\s+", " ", str(row.get("title") or "")).strip()
+    if (not title and category == "processing" and row.get("source_url")
+            and row["source_url"] != "telegram-upload"):
+        title = _stable_order_source(row["source_url"])
+    if title:
+        suffix = f" · {status} · {order_id}"
+        budget = max(1, 64 - (len(suffix.encode("utf-16-le")) // 2) - 3)
+        return f"{_truncate_button_text(title, budget)} · {status} · {order_id}"
+    return _truncate_button_text(
+        f"{_order_kind(category, row['kind'])} · {status} · {order_id}"
+    )
+
+
 def _order_kind(category: str, kind: str) -> str:
     if category == "processing":
         if kind == "caption_video":
@@ -1815,10 +1905,12 @@ async def orders_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             await query.answer("شمارهٔ صفحه معتبر نیست.", show_alert=True)
             return
         rows = await state.database.list_orders(user.id, category, page * ORDER_PAGE_SIZE, ORDER_PAGE_SIZE + 1)
+        if category == "processing":
+            await _hydrate_order_titles(rows[:ORDER_PAGE_SIZE], state.database, user.id)
         await query.answer()
         buttons = []
         for row in rows[:ORDER_PAGE_SIZE]:
-            label = f"{_order_kind(category, row['kind'])} · {ORDER_STATUS.get(row['status'], 'نامشخص')} · {row['id'][:8]}"
+            label = _order_button_label(row, category)
             buttons.append([ui.button(label, f"orders:detail:{category}:{row['id']}:{page}")])
         navigation = []
         if page:
@@ -1847,6 +1939,8 @@ async def orders_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         text = (f"📦 {_order_kind(category, order['kind'])}\n"
                 f"شماره: {order_id[:8]}\nوضعیت: {ORDER_STATUS.get(order['status'], 'نامشخص')}\n"
                 f"تاریخ ثبت: {order['created_at']:%Y-%m-%d %H:%M} UTC")
+        if category == "processing" and order.get("title"):
+            text += f"\nعنوان ویدیو: {order['title']}"
         if category == "processing" and order.get('minutes'):
             text += f"\nمدت قابل محاسبه: {order['minutes']} دقیقه"
             if order.get('package_minutes'):

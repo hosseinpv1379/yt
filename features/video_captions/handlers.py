@@ -13,6 +13,7 @@ from telegram.ext import ApplicationHandlerStop, CallbackQueryHandler, MessageHa
 
 from app import ui
 from app.pipeline import publish_download
+from .ass_builder import FONT_FILES, FONT_LABELS, FONT_SIZE_LABELS
 from .grading import GradeSettings
 from .pipeline import probe, render
 
@@ -32,6 +33,8 @@ class VideoCaptionJob:
     billable_minutes: int
     package_minutes: int = 0
     language: str | None = None
+    font: str = "vazirmatn"
+    font_size: str = "medium"
     mode: str = "subtitle"
     delivery_started: bool = False
     cancel_event: asyncio.Event = field(default_factory=asyncio.Event)
@@ -64,9 +67,16 @@ async def callback(update, context):
     if not item or len(parts) < 3 or parts[2] != item.get("token") or item.get("confirming"):
         await query.answer("این انتخاب منقضی شده است.", show_alert=True)
         return
+    if action == "confirm" and item.get("amount") and item.get("mode") in {"caption", "both"}:
+        # Older pending confirmations did not collect these options. Honor the
+        # price the user already saw and use the established, Persian-safe defaults.
+        if item.get("font") not in FONT_FILES:
+            item["font"] = "vazirmatn"
+        if item.get("font_size") not in FONT_SIZE_LABELS:
+            item["font_size"] = "medium"
     if action == "mode" and len(parts) == 4 and parts[3] in {"caption", "color", "both"}:
         item["mode"] = parts[3]
-        for key in ("language", "color", "amount", "package_id"):
+        for key in ("language", "color", "font", "font_size", "amount", "package_id"):
             item.pop(key, None)
         await query.answer()
         if item["mode"] == "color":
@@ -82,8 +92,8 @@ async def callback(update, context):
             ]))
     elif action == "lang" and len(parts) == 4 and parts[3] in {"fa", "en", "auto"} and item.get("mode") in {"caption", "both"}:
         item["language"] = parts[3]
-        item.pop("amount", None)
-        item.pop("color", None)
+        for key in ("amount", "package_id", "color", "font", "font_size"):
+            item.pop(key, None)
         await query.answer()
         await query.edit_message_text("رنگ کلمهٔ فعال را انتخاب کن:", reply_markup=InlineKeyboardMarkup([
             [ui.button("🟡 زرد", f"vclip:color:{item['token']}:yellow"), ui.button("🟢 سبز", f"vclip:color:{item['token']}:green")],
@@ -93,12 +103,36 @@ async def callback(update, context):
     elif action == "color" and len(parts) == 4 and parts[3] in {"yellow", "green", "blue", "white"} and item.get("mode") in {"caption", "both"} and item.get("language") in {"fa", "en", "auto"}:
         item["color"] = parts[3]
         await query.answer()
+        await query.edit_message_text("فونت زیرنویس را انتخاب کن:", reply_markup=InlineKeyboardMarkup([
+            [ui.button(FONT_LABELS["vazirmatn"], f"vclip:font:{item['token']}:vazirmatn"),
+             ui.button(FONT_LABELS["noto_sans_arabic"], f"vclip:font:{item['token']}:noto_sans_arabic")],
+            [ui.button(FONT_LABELS["noto_naskh_arabic"], f"vclip:font:{item['token']}:noto_naskh_arabic"),
+             ui.button(FONT_LABELS["noto_sans"], f"vclip:font:{item['token']}:noto_sans")],
+            [ui.button(FONT_LABELS["noto_serif"], f"vclip:font:{item['token']}:noto_serif"),
+             ui.button(FONT_LABELS["montserrat"], f"vclip:font:{item['token']}:montserrat")],
+            [ui.button("✕ لغو", f"vclip:cancel:{item['token']}")],
+        ]))
+    elif action == "font" and len(parts) == 4 and parts[3] in FONT_FILES and item.get("mode") in {"caption", "both"} and item.get("color") in {"yellow", "green", "blue", "white"} and item.get("language") in {"fa", "en", "auto"}:
+        item["font"] = parts[3]
+        item.pop("font_size", None)
+        item.pop("amount", None)
+        item.pop("package_id", None)
+        await query.answer()
+        await query.edit_message_text("اندازهٔ فونت ریلز را انتخاب کن:", reply_markup=InlineKeyboardMarkup([
+            [ui.button("کوچک", f"vclip:size:{item['token']}:small"),
+             ui.button("متوسط", f"vclip:size:{item['token']}:medium", style="primary")],
+            [ui.button("بزرگ", f"vclip:size:{item['token']}:large")],
+            [ui.button("✕ لغو", f"vclip:cancel:{item['token']}")],
+        ]))
+    elif action == "size" and len(parts) == 4 and parts[3] in FONT_SIZE_LABELS and item.get("mode") in {"caption", "both"} and item.get("font") in FONT_FILES and item.get("color") in {"yellow", "green", "blue", "white"} and item.get("language") in {"fa", "en", "auto"}:
+        item["font_size"] = parts[3]
+        await query.answer()
         await _quote(query, state, user.id, item)
     elif action == "cancel":
         pending.pop(user.id, None)
         await query.answer()
         await query.edit_message_text("درخواست لغو شد.", reply_markup=ui.back_keyboard("menu:services"))
-    elif action == "confirm" and item.get("amount") and item.get("mode") and item.get("color") and item.get("language") in {"fa", "en", "auto"}:
+    elif action == "confirm" and item.get("amount") and item.get("mode") and item.get("color") and item.get("language") in {"fa", "en", "auto"} and (item.get("mode") == "color" or (item.get("font") in FONT_FILES and item.get("font_size") in FONT_SIZE_LABELS)):
         package_id = parts[3] if len(parts) == 4 else None
         if len(parts) not in {3, 4} or (package_id and package_id != item.get("package_id")):
             await query.answer("روش پرداخت معتبر نیست.", show_alert=True)
@@ -109,11 +143,8 @@ async def callback(update, context):
         if item["mode"] in {"caption", "both"} and not (Path(state.settings.caption_model_path) / "model.bin").is_file():
             await query.answer("مدل رونویسی محلی نصب نشده است؛ هزینه‌ای کسر نشد.", show_alert=True)
             return
-        if item["mode"] in {"caption", "both"} and not all(
-            (Path(state.settings.caption_fonts_dir) / name).is_file()
-            for name in ("Vazirmatn-Bold.ttf", "Montserrat-ExtraBold.ttf")
-        ):
-            await query.answer("فونت‌های زیرنویس نصب نشده‌اند؛ هزینه‌ای کسر نشد.", show_alert=True)
+        if item["mode"] in {"caption", "both"} and not (Path(state.settings.caption_fonts_dir) / FONT_FILES[item["font"]]).is_file():
+            await query.answer("فونت انتخاب‌شده روی سرور نصب نشده است؛ هزینه‌ای کسر نشد.", show_alert=True)
             return
         item["confirming"] = True
         await query.answer()
@@ -143,7 +174,8 @@ async def callback(update, context):
         job = VideoCaptionJob(job_id, user.id, query.message.chat_id, query.message.message_id,
                               item["file_id"], item["mode"], item["color"], item["minutes"],
                               item["minutes"] if package_id else 0,
-                              language=None if item["language"] == "auto" else item["language"])
+                              language=None if item["language"] == "auto" else item["language"],
+                              font=item.get("font", "vazirmatn"), font_size=item.get("font_size", "medium"))
         pending.pop(user.id, None)
         state.active[user.id] = job
         running = int(len(state.active) > state.queue.qsize() + 1)
@@ -167,8 +199,12 @@ async def _quote(query, state, user_id, item):
     if package:
         payment.append(ui.button("🎟 استفاده از بسته", f"vclip:confirm:{item['token']}:{package['id']}", style="primary"))
     language_note = "" if item["mode"] == "color" else f"\nزبان گفتار: { {'fa': 'فارسی', 'en': 'انگلیسی', 'auto': 'تشخیص خودکار'}[item['language']] }"
+    style_note = "" if item["mode"] == "color" else (
+        f"\nفونت: {FONT_LABELS[item['font']]} · اندازه: {FONT_SIZE_LABELS[item['font_size']]}"
+        if item.get("font") in FONT_LABELS and item.get("font_size") in FONT_SIZE_LABELS else ""
+    )
     await query.edit_message_text(
-        f"🧾 مدت قابل محاسبه: {item['minutes']} دقیقه\nتعرفهٔ زیرنویس: {rate:,} تومان در دقیقه\nهزینه: {item['amount']:,} تومان · موجودی: {balance:,} تومان{language_note}\nپردازش گفتار روی سرور انجام می‌شود.",
+        f"🧾 مدت قابل محاسبه: {item['minutes']} دقیقه\nتعرفهٔ زیرنویس: {rate:,} تومان در دقیقه\nهزینه: {item['amount']:,} تومان · موجودی: {balance:,} تومان{language_note}{style_note}\nپردازش گفتار روی سرور انجام می‌شود.",
         reply_markup=InlineKeyboardMarkup([payment,
                                            [ui.button("✕ لغو", f"vclip:cancel:{item['token']}")]]),
     )
@@ -261,7 +297,7 @@ async def run_job(application, state, job):
                                   subject_saturation=state.settings.caption_subject_saturation,
                                   contrast=state.settings.caption_contrast,
                                   mask_smoothing=state.settings.caption_mask_smoothing),
-                    language=job.language,
+                    language=job.language, font=job.font, font_size=job.font_size,
                 )
             except Exception as exc:
                 log = directory / "ffmpeg.log"
@@ -291,7 +327,17 @@ async def run_job(application, state, job):
             delivered = True
             await state.database.update_job(job.id, "completed", size=output.stat().st_size, cost_usd=0)
         language_name = {"fa": "فارسی", "en": "انگلیسی"}.get(language, language)
-        result_note = "گفتاری پیدا نشد؛ اصلاح رنگ انجام شد." if job.edit_mode != "color" and not has_words else (f"زبان {'انتخاب‌شده' if job.language else 'تشخیص‌داده‌شده'}: {language_name}" if language else "")
+        grading_skipped = meta.get("color_correction_skipped_timing", False)
+        if job.edit_mode != "color" and not has_words:
+            result_note = "گفتاری پیدا نشد." if grading_skipped else "گفتاری پیدا نشد؛ اصلاح رنگ انجام شد."
+        else:
+            result_note = f"زبان {'انتخاب‌شده' if job.language else 'تشخیص‌داده‌شده'}: {language_name}" if language else ""
+        if grading_skipped:
+            if result_note:
+                result_note += "\n"
+            result_note += "اصلاح رنگ به‌دلیل نرخ فریم متغیر یا نامشخص انجام نشد تا هم‌زمانی صدای اصلی و تصویر حفظ شود."
+            if has_words:
+                result_note += " زیرنویس با زمان‌بندی اصلی درج شد."
         await application.bot.edit_message_text(f"✅ ویدیوی پردازش‌شده ارسال شد.\n{result_note}", chat_id=job.chat_id, message_id=job.message_id)
     except Exception as exc:
         logger.exception("Caption job %s failed", job.id)

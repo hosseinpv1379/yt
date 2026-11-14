@@ -200,8 +200,8 @@ def _check_cancel(cancel_event: asyncio.Event) -> None:
         raise JobCancelled("Job cancelled by user")
 
 
-def get_video_details(url: str, settings: Settings) -> tuple[list[int], float]:
-    """Probe a YouTube URL and return available heights and duration in seconds."""
+def get_video_details_with_title(url: str, settings: Settings) -> tuple[list[int], float, str]:
+    """Probe a YouTube URL and return available heights, duration, and title."""
     directory = Path(settings.work_dir) / f"probe-{uuid.uuid4().hex}"
     directory.mkdir(parents=True, exist_ok=True)
     try:
@@ -244,14 +244,38 @@ def get_video_details(url: str, settings: Settings) -> tuple[list[int], float]:
                 }
                 duration = float(info.get("duration") or 0)
                 if duration > 0:
-                    return sorted(heights, reverse=True), duration
+                    title = re.sub(r"\s+", " ", str(info.get("title") or "")).strip()
+                    return sorted(heights, reverse=True), duration, title[:255]
             except yt_dlp.utils.DownloadError as exc:
                 last_error = exc
         if last_error:
             raise RuntimeError(str(last_error)[:500]) from last_error
-        return [], 0.0
+        return [], 0.0, ""
     finally:
         cleanup(directory)
+
+
+def get_video_details(url: str, settings: Settings) -> tuple[list[int], float]:
+    """Backward-compatible probe returning available heights and duration."""
+    heights, duration, _ = get_video_details_with_title(url, settings)
+    return heights, duration
+
+
+def get_public_youtube_title(url: str) -> str:
+    """Best-effort title lookup for old orders, without using account cookies."""
+    options = {
+        "skip_download": True,
+        "quiet": True,
+        "no_warnings": True,
+        "noplaylist": True,
+        "socket_timeout": 3,
+        "retries": 0,
+        "fragment_retries": 0,
+        "no_cache_dir": True,
+    }
+    with yt_dlp.YoutubeDL(options) as ydl:
+        info = ydl.extract_info(url, download=False)
+    return re.sub(r"\s+", " ", str(info.get("title") or "")).strip()[:255]
 
 
 def get_available_qualities(url: str, settings: Settings) -> list[int]:

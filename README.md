@@ -210,7 +210,7 @@ cat ytbot-backup.sql | docker compose exec -T database psql -U ytbot -d ytbot
 
 ### زیرنویس انیمیشنی و اصلاح رنگ ویدیوی ارسالی
 
-در Docker فایل‌های فونت Vazirmatn Bold و Montserrat ExtraBold هنگام ساخت ایمیج در `/app/assets/fonts` قرار می‌گیرند و پشتیبانی `ass` و HarfBuzz بررسی می‌شود. مدل faster-whisper باید یک بار با اتصال اینترنت روی volume پایدار دانلود شود؛ هنگام پردازش از مسیر محلی خوانده می‌شود و به API گفتار متصل نمی‌شود:
+در Docker شش خانوادهٔ فونت Vazirmatn، Noto Sans Arabic، Noto Naskh Arabic، Noto Sans، Noto Serif و Montserrat به‌همراه اعلان‌های مجوزشان در `/app/assets/fonts` قرار می‌گیرند. کاربر هنگام سفارش زیرنویس، فونت و اندازهٔ کوچک، متوسط یا بزرگ را انتخاب می‌کند. ایمیج وجود پشتیبانی `ass`، HarfBuzz و چیدمان کامل متن در libass را بررسی می‌کند تا ترتیب راست‌به‌چپ فارسی بین رنگ‌آمیزی واژه‌ها حفظ شود. مدل faster-whisper باید یک بار با اتصال اینترنت روی volume پایدار دانلود شود؛ هنگام پردازش از مسیر محلی خوانده می‌شود و به API گفتار متصل نمی‌شود:
 
 وابستگی‌های گفتار از `faster-whisper==1.2.1` و `av<19` استفاده می‌کنند؛ PyAV 19 پارامتری را که این نسخهٔ faster-whisper برای خواندن صوت نیاز دارد حذف کرده است. هنگام ساخت ایمیج یک نمونهٔ صوتی کوتاه با دیکودر واقعی بررسی می‌شود. پس از تغییر وابستگی‌ها ایمیج bot را دوباره بساز؛ مدل ذخیره‌شده در volume نیازی به دانلود مجدد ندارد.
 
@@ -226,17 +226,21 @@ docker compose up -d bot
 
 ```sh
 sudo apt-get update
-sudo apt-get install -y ffmpeg libass9 libharfbuzz0b fonts-vazirmatn fonts-montserrat libgl1 libglib2.0-0
+sudo apt-get install -y ffmpeg libass9 libharfbuzz0b fonts-vazirmatn fonts-montserrat fonts-noto-core libgl1 libglib2.0-0
 python3 -m pip install -r requirements.txt
 mkdir -p assets/fonts models/whisper-medium
 cp "$(fc-match -f '%{file}' 'Vazirmatn:style=Bold')" assets/fonts/Vazirmatn-Bold.ttf
 cp "$(fc-match -f '%{file}' 'Montserrat:style=ExtraBold')" assets/fonts/Montserrat-ExtraBold.ttf
+cp "$(fc-match -f '%{file}' 'Noto Sans Arabic:style=Bold')" assets/fonts/NotoSansArabic-Bold.ttf
+cp "$(fc-match -f '%{file}' 'Noto Naskh Arabic:style=Bold')" assets/fonts/NotoNaskhArabic-Bold.ttf
+cp "$(fc-match -f '%{file}' 'Noto Sans:style=Bold')" assets/fonts/NotoSans-Bold.ttf
+cp "$(fc-match -f '%{file}' 'Noto Serif:style=Bold')" assets/fonts/NotoSerif-Bold.ttf
 python3 -c 'from faster_whisper.utils import download_model; download_model("medium", output_dir="models/whisper-medium")'
 ```
 
 برای اجرای مستقیم، `CAPTION_MODEL_PATH` را به مسیر مطلق `models/whisper-medium` و `CAPTION_FONTS_DIR` را به مسیر مطلق `assets/fonts` در `.env` تنظیم کن. با `ffmpeg -filters | grep -E ' (ass|subtitles) '` وجود libass و با `ldd /usr/lib/x86_64-linux-gnu/libass.so.9 | grep harfbuzz` اتصال HarfBuzz را بررسی کن؛ در صورت نبودشان FFmpeg و libass توزیع را نصب یا با این قابلیت‌ها بازسازی کن.
 
-برای بررسی دستی، ویدیوی ۱۰ ثانیه‌ای دارای گفتار فارسی یا انگلیسی را در خدمت جدید بفرست، «هر دو» و یک رنگ را انتخاب و هزینه را تأیید کن. در خروجی ترتیب کلمات، اتصال حروف فارسی، رنگ کلمهٔ فعال، صدای اصلی و ظاهر لبهٔ سوژه را ببین؛ سپس با ویدیوی بی‌گفتار و گزینهٔ فقط رنگ نیز امتحان کن. MediaPipe Selfie Segmentation برای انسان طراحی شده است؛ اشیای دیگر ممکن است شناسایی نشوند و در نبود ماسک، اصلاح سراسری استفاده می‌شود. پردازش فریم‌ها با نرخ فریم ثابت انجام می‌شود و ویدیوهای دارای نرخ متغیر ممکن است زمان‌بندی متفاوتی داشته باشند.
+برای بررسی دستی، ویدیوی ۱۰ ثانیه‌ای دارای گفتار فارسی یا انگلیسی را در خدمت جدید بفرست، «هر دو» و یک رنگ را انتخاب و هزینه را تأیید کن. در خروجی ترتیب کلمات، اتصال حروف فارسی، رنگ کلمهٔ فعال، صدای اصلی و ظاهر لبهٔ سوژه را ببین؛ سپس با ویدیوی بی‌گفتار و گزینهٔ فقط رنگ نیز امتحان کن. MediaPipe Selfie Segmentation برای انسان طراحی شده است؛ اشیای دیگر ممکن است شناسایی نشوند و در نبود ماسک، اصلاح سراسری استفاده می‌شود. در پردازش رنگ، زمان فریم‌های کل کلیپ (حداکثر ۹۰ ثانیه) بررسی می‌شود؛ اگر نرخ فریم متغیر یا زمان‌بندی نامشخص باشد، اصلاح رنگ رد می‌شود تا صدای اصلی و تصویر هم‌زمان بمانند. زیرنویس با زمان‌بندی ویدیوی اصلی رندر می‌شود.
 
 ### دریافت از شبکه‌های اجتماعی
 
