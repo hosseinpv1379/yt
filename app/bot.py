@@ -1028,13 +1028,24 @@ async def admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     await _show_admin_panel(message.reply_text, state, user.id)
 
 
+def _bounded_percent(value: str, default: int = 10) -> int:
+    try:
+        return max(0, min(100, int(value)))
+    except (TypeError, ValueError):
+        return default
+
+
 async def _show_admin_panel(send, state: BotState, user_id: int) -> None:
     stats = await state.database.get_business_stats()
     subtitle = int(await state.database.get_setting("price_subtitle_toman_per_minute", str(state.settings.default_subtitle_price_toman_per_minute)))
     dub = int(await state.database.get_setting("price_dub_toman_per_minute", str(state.settings.default_dub_price_toman_per_minute)))
+    original_audio_percent = _bounded_percent(
+        await state.database.get_setting("dub_original_audio_percent", "10")
+    )
     keyboard = InlineKeyboardMarkup([
         [InlineKeyboardButton("✏️ نرخ زیرنویس", callback_data="admin:edit:subtitle"),
          InlineKeyboardButton("✏️ نرخ دوبله", callback_data="admin:edit:dub")],
+        [InlineKeyboardButton(f"🔊 صدای اصلی دوبله: {original_audio_percent}%", callback_data="admin:dub-audio-level")],
         [InlineKeyboardButton("➕ شارژ کاربر", callback_data="admin:wallet:credit"),
          InlineKeyboardButton("➖ کسر از کیف پول", callback_data="admin:wallet:debit")],
         [InlineKeyboardButton("👤 بررسی کاربر", callback_data="admin:wallet:lookup")],
@@ -1142,6 +1153,18 @@ async def admin_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         buttons += [[ui.button("✏️ قیمت ساخت", "admin:imageprice"), ui.button("✏️ قیمت ویرایش", "admin:imageeditprice")], [ui.button("‹ پنل مدیریت", "admin:refresh")]]
         rates = "\n".join(f"{item.model} · {_provider_label(item.provider)}: {item.price_hint}" for item in image_generation.MODELS)
         await _edit_query_screen(query, f"🎨 تنظیم تولید تصویر\n\nمدل: {model.model}\nساخت: {price:,} تومان · ویرایش: {edit_price:,} تومان (صفر = غیرفعال)\n\n{rates}\n\nهزینهٔ بهینه‌سازی و عکس ورودی جداگانه به هزینهٔ API افزوده می‌شود. نرخ‌ها تقریبی‌اند؛ قیمت و دسترسی را بررسی کن.", reply_markup=InlineKeyboardMarkup(buttons))
+        return
+    if action == ["admin", "dub-audio-level"]:
+        current = _bounded_percent(
+            await state.database.get_setting("dub_original_audio_percent", "10")
+        )
+        state.admin_editing[user.id] = "dub_original_audio_percent"
+        await query.answer()
+        await _edit_query_screen(
+            query,
+            f"🔊 صدای اصلی در دوبله اکنون {current}% است.\n"
+            "درصد دلخواه را از ۰ تا ۱۰۰ بفرست؛ مقدار پیش‌فرض ۱۰٪ است.\nلغو: /cancel",
+        )
         return
     if len(action) == 3 and action[1] == "imagemodel":
         option = image_generation.BY_CODE.get(action[2])
@@ -1322,6 +1345,20 @@ async def _save_admin_value(update: Update, state: BotState, application: Applic
                 f"{item['status']}{minutes} · {amount}"
             )
         await message.reply_text("\n".join(lines))
+        return
+    if key == "dub_original_audio_percent":
+        digits = str.maketrans("۰۱۲۳۴۵۶۷۸۹٠١٢٣٤٥٦٧٨٩", "01234567890123456789")
+        raw = message.text.strip().translate(digits)
+        try:
+            percent = int(raw)
+            if not 0 <= percent <= 100:
+                raise ValueError
+        except ValueError:
+            await message.reply_text("یک عدد صحیح بین ۰ تا ۱۰۰ بفرست؛ نمونه: 10")
+            return
+        await state.database.set_setting(key, str(percent))
+        state.admin_editing.pop(user.id, None)
+        await message.reply_text(f"✅ صدای اصلی برای دوبله‌های بعدی روی {percent}% تنظیم شد.")
         return
     if key in {"credit", "debit"}:
         try:
@@ -2560,6 +2597,11 @@ async def worker(application: Application) -> None:
 
             progress_task = asyncio.create_task(_progress_updater(application, job, progress_queue))
             await _publish_progress(application, job, "دانلود ویدیو", 0)
+            original_audio_percent = 10
+            if job.mode == "dub":
+                original_audio_percent = _bounded_percent(
+                    await state.database.get_setting("dub_original_audio_percent", "10")
+                )
             output, srt, vtt, costs = await asyncio.to_thread(
                 process_video,
                 job.url,
@@ -2573,6 +2615,7 @@ async def worker(application: Application) -> None:
                 job.models,
                 job.team_glossary,
                 job.dub_mode,
+                original_audio_percent,
             )
             subtitle_text = srt.read_text(encoding="utf-8")
             if job.cancel_event.is_set():

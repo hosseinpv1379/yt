@@ -1075,12 +1075,21 @@ def _realtime_speech_cost(model: str, usage: dict) -> float | None:
     return cost
 
 
-def _mux_dubbed_video(video: Path, audio: Path, output: Path, watermark_text: str = "", background: Path | None = None) -> None:
+def _mux_dubbed_video(
+    video: Path,
+    audio: Path,
+    output: Path,
+    watermark_text: str = "",
+    background: Path | None = None,
+    original_audio_percent: int = 10,
+) -> None:
     # Keep the source sound bed throughout the whole video. Duck it smoothly
     # under Persian speech, then mix and limit peaks. This is not source
     # separation: the original dialogue can remain audible.
+    original_audio_percent = max(0, min(100, int(original_audio_percent)))
+    bed_volume = original_audio_percent / 100
     audio_mix = (
-        f"[{2 if background else 0}:a:0]aformat=sample_rates=48000:channel_layouts=stereo,volume=0.45[bed];"
+        f"[{2 if background else 0}:a:0]aformat=sample_rates=48000:channel_layouts=stereo,volume={bed_volume:.2f}[bed];"
         "[1:a:0]aformat=sample_rates=48000:channel_layouts=stereo,asplit=2[voice_sc][voice];"
         "[bed][voice_sc]sidechaincompress=threshold=0.04:ratio=4:attack=40:release=350[ducked];"
         "[ducked][voice]amix=inputs=2:duration=first:dropout_transition=0:normalize=0,"
@@ -1140,6 +1149,7 @@ def process_video(
     model_selection: ModelSelection | None = None,
     team_glossary: str = "",
     dub_mode: str = "simple",
+    original_audio_percent: int = 10,
 ) -> tuple[Path, Path, Path, OpenAICost]:
     job_dir.mkdir(parents=True, exist_ok=True)
     _check_cancel(cancel_event)
@@ -1266,7 +1276,10 @@ def process_video(
         translation_cost = _sum_known_costs(translation_cost, rewrite_cost)
         if progress_callback:
             progress_callback("ترکیب صدای دوبله با ویدیو", 92)
-        _mux_dubbed_video(video, dubbed_audio, output, settings.watermark_text, background)
+        _mux_dubbed_video(
+            video, dubbed_audio, output, settings.watermark_text, background,
+            original_audio_percent,
+        )
     else:
         if settings.watermark_text or not settings.download_base_url:
             if progress_callback:
