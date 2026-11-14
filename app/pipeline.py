@@ -1309,7 +1309,7 @@ def cleanup_expired_downloads(directory: Path, ttl_hours: int) -> None:
     for path in directory.iterdir():
         try:
             if (path.is_file()
-                    and re.fullmatch(r"[a-f0-9]{32}\.(?:mp4|mp3|srt|vtt|html)", path.name)
+                    and re.fullmatch(r"[a-f0-9]{32}\.(?:mp4|mp3|zip|jpe?g|png|webp|avif|srt|vtt|html)", path.name)
                     and path.stat().st_mtime < cutoff):
                 path.unlink(missing_ok=True)
         except OSError:
@@ -1320,7 +1320,7 @@ def publish_download(video: Path, directory: Path, ttl_hours: int, *, suffix: st
     directory.mkdir(parents=True, exist_ok=True)
     cleanup_expired_downloads(directory, ttl_hours)
     token = uuid.uuid4().hex
-    if suffix not in {"mp4", "mp3"}:
+    if suffix not in {"mp4", "mp3", "zip", "jpg", "jpeg", "png", "webp", "avif"}:
         raise ValueError("Unsupported download format")
     destination = directory / f"{token}.{suffix}"
     temporary = directory / f".{token}.tmp"

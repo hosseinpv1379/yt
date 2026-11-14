@@ -20,7 +20,7 @@ from .config import Settings, load_settings
 from .database import Database
 from .openai_limits import ModelLimit, OpenAILimitsUnavailable, get_openai_limits
 from . import ui, model_catalog, image_generation
-from .downloads import classify_link, download_media, resolve_spotify_track
+from .downloads import classify_link, download_media, is_instagram_media_url, resolve_spotify_track
 from .content import edit_subtitle_line, generate_content
 from .pipeline import (
     JobCancelled,
@@ -281,10 +281,17 @@ async def receive_link(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             ])
         else:
             text = "📥 دانلود فایل\n\nنوع خروجی را انتخاب کن. این مسیر فقط دانلود است و هزینهٔ پردازش ندارد."
-            keyboard = InlineKeyboardMarkup([
-                [ui.button("🎬 ویدیو", f"dl:{token}:video", style="primary"), ui.button("🎵 فایل صوتی MP3", f"dl:{token}:audio")],
-                [ui.button("‹ بازگشت (لغو)", f"order_cancel:{token}", style="danger")],
-            ])
+            buttons = []
+            if is_instagram_media_url(url):
+                text = "📥 دانلود اینستاگرام\n\nنوع مدیا را خودکار تشخیص می‌دهم و با قالب مناسب می‌فرستم: عکس، ویدیو، ریلز، استوری یا کاروسل. چند مدیا در یک فایل ZIP قرار می‌گیرد."
+                buttons.append([ui.button("⬇️ دانلود هوشمند", f"dl:{token}:media", style="primary")])
+            else:
+                buttons.append([
+                    ui.button("🎬 ویدیو", f"dl:{token}:video", style="primary"),
+                    ui.button("🎵 فایل صوتی MP3", f"dl:{token}:audio"),
+                ])
+            buttons.append([ui.button("‹ بازگشت (لغو)", f"order_cancel:{token}", style="danger")])
+            keyboard = InlineKeyboardMarkup(buttons)
         await context.application.bot.edit_message_text(text, chat_id=selection.chat_id,
             message_id=selection.message_id, reply_markup=keyboard)
         return
@@ -309,7 +316,10 @@ async def choose_download(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     selection = state.pending_quality.get(token)
     if (not selection or selection.user_id != user.id or selection.confirming
             or selection.download_source not in {"social", "spotify"}
-            or kind not in {"video", "audio"} or (selection.download_source == "spotify" and kind != "audio")):
+            or kind not in {"video", "audio", "media"}
+            or (kind == "media" and (selection.download_source != "social" or not is_instagram_media_url(selection.url)))
+            or (is_instagram_media_url(selection.url) and kind != "media")
+            or (selection.download_source == "spotify" and kind != "audio")):
         await query.answer("این انتخاب دیگر معتبر نیست.", show_alert=True)
         return
     selection.confirming = True
@@ -1723,7 +1733,7 @@ def _order_kind(category: str, kind: str) -> str:
     if category == "processing":
         return "زیرنویس فارسی" if kind == "subtitle" else "دوبلهٔ فارسی"
     if category == "download":
-        return "فایل صوتی" if kind == "audio" else "ویدیو"
+        return {"audio": "فایل صوتی", "media": "مدیای اینستاگرام"}.get(kind, "ویدیو")
     return "خلاصه و جزوه" if kind == "summary" else "بستهٔ تولید محتوا"
 
 
@@ -1753,7 +1763,7 @@ def _order_active_link(order: dict, category: str, settings, now: datetime) -> t
         elif category == "processing" and filename == "video-fa.mp4":
             if (directory / f"{token}.mp4").is_file():
                 return f"{settings.download_base_url}/{token}.mp4", expiry, "video"
-        elif category == "download" and filename in {"mp3", "mp4"}:
+        elif category == "download" and filename in {"mp3", "mp4", "zip", "jpg", "jpeg", "png", "webp", "avif"}:
             if (directory / f"{token}.{filename}").is_file():
                 return f"{settings.download_base_url}/{token}.{filename}", expiry, "download"
     return None
@@ -2493,6 +2503,8 @@ async def _run_download_job(application: Application, state: BotState, job: Down
             await _safe_progress(application, job, "🔎 جست‌وجوی نسخهٔ مشابه در YouTube…")
             url, title = await asyncio.to_thread(resolve_spotify_track, url, state.settings)
             await _safe_progress(application, job, f"🎵 نسخهٔ پیدا شده: {title}\nدر حال دریافت از YouTube…")
+        elif is_instagram_media_url(url):
+            await _safe_progress(application, job, "🔎 در حال تشخیص خودکار نوع مدیای اینستاگرام و دریافت آن…")
         else:
             await _safe_progress(application, job, "📥 در حال دریافت فایل…")
         if job.cancel_event.is_set():
@@ -2500,16 +2512,29 @@ async def _run_download_job(application: Application, state: BotState, job: Down
         output, title = await asyncio.to_thread(download_media, url, job.kind, job.directory, state.settings, job.cancel_event)
         if job.cancel_event.is_set():
             raise JobCancelled()
-        caption = f"✅ {title}" + ("\nنسخهٔ یافت‌شده در YouTube؛ ممکن است با نسخهٔ Spotify متفاوت باشد." if job.source == "spotify" else "")
         token, suffix, expires_at = None, None, None
+        output_extension = output.suffix.lower().removeprefix(".")
+        media_label = {
+            "mp4": "🎬 ویدیوی اینستاگرام",
+            "zip": "📦 مجموعهٔ مدیاهای اینستاگرام",
+            "jpg": "🖼 عکس اینستاگرام",
+            "jpeg": "🖼 عکس اینستاگرام",
+            "png": "🖼 عکس اینستاگرام",
+            "webp": "🖼 عکس اینستاگرام",
+            "avif": "🖼 عکس اینستاگرام",
+        }.get(output_extension, "📥 مدیای اینستاگرام") if job.kind == "media" else ""
+        caption_prefix = f"{media_label}\n" if media_label else ""
+        caption = f"{caption_prefix}✅ {title}" + ("\nنسخهٔ یافت‌شده در YouTube؛ ممکن است با نسخهٔ Spotify متفاوت باشد." if job.source == "spotify" else "")
         if output.stat().st_size <= 48_000_000:
             with output.open('rb') as media:
-                if job.kind == "audio":
+                if output_extension == "mp3":
                     await application.bot.send_audio(job.chat_id, media, caption=caption, read_timeout=120, write_timeout=120)
-                else:
+                elif output_extension == "mp4":
                     await application.bot.send_video(job.chat_id, media, caption=caption, supports_streaming=True, read_timeout=120, write_timeout=120)
+                else:
+                    await application.bot.send_document(job.chat_id, media, filename=output.name, caption=caption, read_timeout=120, write_timeout=120)
         elif state.settings.download_base_url:
-            suffix = 'mp3' if job.kind == 'audio' else 'mp4'
+            suffix = output_extension
             token = await asyncio.to_thread(publish_download, output, Path(state.settings.download_dir), state.settings.download_ttl_hours, suffix=suffix)
             link = f"{state.settings.download_base_url}/{token}.{suffix}"
             expires_at = datetime.now(UTC) + timedelta(hours=state.settings.download_ttl_hours)
@@ -2535,7 +2560,7 @@ async def _run_download_job(application: Application, state: BotState, job: Down
             await state.database.update_download_task(job.id, "failed")
         except Exception:
             logger.exception("Could not persist failed download %s", job.id)
-        await _safe_progress(application, job, "دانلود انجام نشد. لینک ممکن است خصوصی، چندبخشی یا در این سرویس موقتاً غیرقابل‌دسترسی باشد؛ دوباره تلاش کن.")
+        await _safe_progress(application, job, "دانلود انجام نشد. لینک ممکن است خصوصی، منقضی یا به‌دلیل تغییرات اینستاگرام موقتاً غیرقابل‌دسترسی باشد؛ دوباره تلاش کن.")
     finally:
         cleanup(job.directory)
         state.active.pop(job.user_id, None)
