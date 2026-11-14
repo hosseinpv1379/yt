@@ -1,0 +1,1 @@
+Docker installs Vazirmatn and Montserrat and copies the bold font files into this directory inside the image. For a host installation, populate `Vazirmatn-Bold.ttf` and `Montserrat-ExtraBold.ttf` as described in the project's README. Both fonts use the SIL Open Font License.
