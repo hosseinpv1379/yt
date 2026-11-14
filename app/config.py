@@ -43,7 +43,7 @@ class Settings:
     card_to_card_holder: str
     minimum_wallet_topup_toman: int
     dub_separator_url: str = ""
-    caption_model_path: str = "/data/models/whisper-small"
+    caption_model_path: str = "/data/models/whisper-medium"
     caption_fonts_dir: str = "assets/fonts"
     caption_background_brightness: float = 0.55
     caption_background_saturation: float = 0.80
@@ -127,7 +127,7 @@ def load_settings() -> Settings:
         card_to_card_holder=os.getenv("CARD_TO_CARD_HOLDER", "").strip(),
         minimum_wallet_topup_toman=max(1, int(os.getenv("MINIMUM_WALLET_TOPUP_TOMAN", "50000"))),
         dub_separator_url=os.getenv("DUB_SEPARATOR_URL", "").strip().rstrip("/"),
-        caption_model_path=os.getenv("CAPTION_MODEL_PATH", "/data/models/whisper-small").strip(),
+        caption_model_path=os.getenv("CAPTION_MODEL_PATH", "/data/models/whisper-medium").strip(),
         caption_fonts_dir=os.getenv("CAPTION_FONTS_DIR", "assets/fonts").strip(),
         caption_background_brightness=max(0.0, min(1.0, float(os.getenv("CAPTION_BACKGROUND_BRIGHTNESS", "0.55")))),
         caption_background_saturation=max(0.0, min(2.0, float(os.getenv("CAPTION_BACKGROUND_SATURATION", "0.80")))),

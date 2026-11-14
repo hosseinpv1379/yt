@@ -31,6 +31,7 @@ class VideoCaptionJob:
     color: str
     billable_minutes: int
     package_minutes: int = 0
+    language: str | None = None
     mode: str = "subtitle"
     delivery_started: bool = False
     cancel_event: asyncio.Event = field(default_factory=asyncio.Event)
@@ -65,17 +66,31 @@ async def callback(update, context):
         return
     if action == "mode" and len(parts) == 4 and parts[3] in {"caption", "color", "both"}:
         item["mode"] = parts[3]
+        for key in ("language", "color", "amount", "package_id"):
+            item.pop(key, None)
         await query.answer()
         if item["mode"] == "color":
+            item["language"] = "auto"
             item["color"] = "yellow"
             await _quote(query, state, user.id, item)
         else:
-            await query.edit_message_text("رنگ کلمهٔ فعال را انتخاب کن:", reply_markup=InlineKeyboardMarkup([
-                [ui.button("🟡 زرد", f"vclip:color:{item['token']}:yellow"), ui.button("🟢 سبز", f"vclip:color:{item['token']}:green")],
-                [ui.button("🔵 آبی", f"vclip:color:{item['token']}:blue"), ui.button("⚪ سفید", f"vclip:color:{item['token']}:white")],
+            await query.edit_message_text("زبان گفتار ویدیو را انتخاب کن:", reply_markup=InlineKeyboardMarkup([
+                [ui.button("🇮🇷 فارسی", f"vclip:lang:{item['token']}:fa", style="primary"),
+                 ui.button("🇬🇧 انگلیسی", f"vclip:lang:{item['token']}:en")],
+                [ui.button("🌐 تشخیص خودکار", f"vclip:lang:{item['token']}:auto")],
                 [ui.button("✕ لغو", f"vclip:cancel:{item['token']}")],
             ]))
-    elif action == "color" and len(parts) == 4 and parts[3] in {"yellow", "green", "blue", "white"} and item.get("mode") in {"caption", "both"}:
+    elif action == "lang" and len(parts) == 4 and parts[3] in {"fa", "en", "auto"} and item.get("mode") in {"caption", "both"}:
+        item["language"] = parts[3]
+        item.pop("amount", None)
+        item.pop("color", None)
+        await query.answer()
+        await query.edit_message_text("رنگ کلمهٔ فعال را انتخاب کن:", reply_markup=InlineKeyboardMarkup([
+            [ui.button("🟡 زرد", f"vclip:color:{item['token']}:yellow"), ui.button("🟢 سبز", f"vclip:color:{item['token']}:green")],
+            [ui.button("🔵 آبی", f"vclip:color:{item['token']}:blue"), ui.button("⚪ سفید", f"vclip:color:{item['token']}:white")],
+            [ui.button("✕ لغو", f"vclip:cancel:{item['token']}")],
+        ]))
+    elif action == "color" and len(parts) == 4 and parts[3] in {"yellow", "green", "blue", "white"} and item.get("mode") in {"caption", "both"} and item.get("language") in {"fa", "en", "auto"}:
         item["color"] = parts[3]
         await query.answer()
         await _quote(query, state, user.id, item)
@@ -83,7 +98,7 @@ async def callback(update, context):
         pending.pop(user.id, None)
         await query.answer()
         await query.edit_message_text("درخواست لغو شد.", reply_markup=ui.back_keyboard("menu:services"))
-    elif action == "confirm" and item.get("amount") and item.get("mode") and item.get("color"):
+    elif action == "confirm" and item.get("amount") and item.get("mode") and item.get("color") and item.get("language") in {"fa", "en", "auto"}:
         package_id = parts[3] if len(parts) == 4 else None
         if len(parts) not in {3, 4} or (package_id and package_id != item.get("package_id")):
             await query.answer("روش پرداخت معتبر نیست.", show_alert=True)
@@ -127,7 +142,8 @@ async def callback(update, context):
             return
         job = VideoCaptionJob(job_id, user.id, query.message.chat_id, query.message.message_id,
                               item["file_id"], item["mode"], item["color"], item["minutes"],
-                              item["minutes"] if package_id else 0)
+                              item["minutes"] if package_id else 0,
+                              language=None if item["language"] == "auto" else item["language"])
         pending.pop(user.id, None)
         state.active[user.id] = job
         running = int(len(state.active) > state.queue.qsize() + 1)
@@ -135,6 +151,8 @@ async def callback(update, context):
         state.queue.put_nowait(job)
         balance_text = f"باقی‌ماندهٔ بسته: {balance} دقیقه" if package_id else f"موجودی: {balance:,} تومان"
         await query.edit_message_text(f"✅ سفارش در صف ثبت شد. تعداد کارهای پیش از آن: {position - 1}\n{balance_text}", reply_markup=ui.job_keyboard(job.id))
+    else:
+        await query.answer("این انتخاب دیگر معتبر نیست.", show_alert=True)
 
 
 async def _quote(query, state, user_id, item):
@@ -148,8 +166,9 @@ async def _quote(query, state, user_id, item):
     payment = [ui.button("✓ پرداخت از کیف پول", f"vclip:confirm:{item['token']}", style="success")]
     if package:
         payment.append(ui.button("🎟 استفاده از بسته", f"vclip:confirm:{item['token']}:{package['id']}", style="primary"))
+    language_note = "" if item["mode"] == "color" else f"\nزبان گفتار: { {'fa': 'فارسی', 'en': 'انگلیسی', 'auto': 'تشخیص خودکار'}[item['language']] }"
     await query.edit_message_text(
-        f"🧾 مدت قابل محاسبه: {item['minutes']} دقیقه\nتعرفهٔ زیرنویس: {rate:,} تومان در دقیقه\nهزینه: {item['amount']:,} تومان · موجودی: {balance:,} تومان\nپردازش گفتار روی سرور انجام می‌شود.",
+        f"🧾 مدت قابل محاسبه: {item['minutes']} دقیقه\nتعرفهٔ زیرنویس: {rate:,} تومان در دقیقه\nهزینه: {item['amount']:,} تومان · موجودی: {balance:,} تومان{language_note}\nپردازش گفتار روی سرور انجام می‌شود.",
         reply_markup=InlineKeyboardMarkup([payment,
                                            [ui.button("✕ لغو", f"vclip:cancel:{item['token']}")]]),
     )
@@ -242,6 +261,7 @@ async def run_job(application, state, job):
                                   subject_saturation=state.settings.caption_subject_saturation,
                                   contrast=state.settings.caption_contrast,
                                   mask_smoothing=state.settings.caption_mask_smoothing),
+                    language=job.language,
                 )
             except Exception as exc:
                 log = directory / "ffmpeg.log"
@@ -270,7 +290,8 @@ async def run_job(application, state, job):
                 raise ValueError("ویدیو برای ارسال تلگرام بزرگ است و لینک دانلود تنظیم نشده است.")
             delivered = True
             await state.database.update_job(job.id, "completed", size=output.stat().st_size, cost_usd=0)
-        result_note = "گفتاری پیدا نشد؛ اصلاح رنگ انجام شد." if job.edit_mode != "color" and not has_words else (f"زبان تشخیص‌داده‌شده: {language}" if language else "")
+        language_name = {"fa": "فارسی", "en": "انگلیسی"}.get(language, language)
+        result_note = "گفتاری پیدا نشد؛ اصلاح رنگ انجام شد." if job.edit_mode != "color" and not has_words else (f"زبان {'انتخاب‌شده' if job.language else 'تشخیص‌داده‌شده'}: {language_name}" if language else "")
         await application.bot.edit_message_text(f"✅ ویدیوی پردازش‌شده ارسال شد.\n{result_note}", chat_id=job.chat_id, message_id=job.message_id)
     except Exception as exc:
         logger.exception("Caption job %s failed", job.id)

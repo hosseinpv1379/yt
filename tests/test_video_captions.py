@@ -53,16 +53,47 @@ class TranscriptionTests(unittest.TestCase):
             def transcribe(self, path, **kwargs):
                 self.options = kwargs
                 segment = types.SimpleNamespace(words=[types.SimpleNamespace(word=" hello", start=.1, end=.5)])
-                return iter([segment]), types.SimpleNamespace(language="en")
+                return iter([segment]), types.SimpleNamespace(language=kwargs.get("language") or "en")
         module = types.SimpleNamespace(WhisperModel=FakeModel)
         with patch.dict(sys.modules, {"faster_whisper": module}):
             first, language = transcribe(Path("audio.mp4"), "/local/model")
-            transcribe(Path("audio.mp4"), "/local/model")
+            persian_words, persian_language = transcribe(Path("audio.mp4"), "/local/model", "fa")
             model = _model("/local/model")
         self.assertEqual(len(calls), 1)
         self.assertTrue(calls[0][1]["local_files_only"])
-        self.assertEqual(model.options, {"word_timestamps": True, "vad_filter": True})
+        self.assertEqual(model.options["language"], "fa")
+        self.assertTrue(model.options["word_timestamps"])
+        self.assertTrue(model.options["vad_filter"])
+        self.assertEqual(model.options["beam_size"], 8)
+        self.assertEqual(model.options["language_detection_segments"], 3)
+        self.assertEqual(model.options["vad_parameters"]["threshold"], 0.4)
         self.assertEqual((first[0].text, language), ("hello", "en"))
+        self.assertEqual((persian_words[0].text, persian_language), ("hello", "fa"))
+
+    def test_rejects_english_only_model_for_persian_or_auto(self):
+        model = types.SimpleNamespace(model=types.SimpleNamespace(is_multilingual=False))
+        with patch("features.video_captions.transcribe._model", return_value=model):
+            for language in (None, "fa"):
+                with self.subTest(language=language), self.assertRaises(ValueError):
+                    transcribe(Path("audio.mp4"), "/local/model", language)
+
+    def test_render_passes_selected_language_to_transcription(self):
+        meta = {"width": 640, "height": 360, "duration": 3.0, "audio": True}
+        words = [Word("سلام", 0.1, 0.5)]
+        progress = []
+        with tempfile.TemporaryDirectory() as tmp, \
+                patch("features.video_captions.pipeline.probe", return_value=meta), \
+                patch("features.video_captions.pipeline.transcribe", return_value=(words, "fa")) as mock_transcribe, \
+                patch("features.video_captions.pipeline.subprocess.run"):
+            root = Path(tmp)
+            _, language, has_words = render(root / "input.mp4", root / "out.mp4", "caption", "yellow",
+                                              "/local/model", root, threading.Event(), progress.append, language="fa")
+            caption = (root / "captions.ass").read_text(encoding="utf-8")
+        mock_transcribe.assert_called_once_with(root / "input.mp4", "/local/model", "fa")
+        self.assertEqual(language, "fa")
+        self.assertTrue(has_words)
+        self.assertIn("Vazirmatn", caption)
+        self.assertTrue(any("زبان انتخاب‌شده: فارسی" in line for line in progress))
 
     @unittest.skipUnless(importlib.util.find_spec("av") and importlib.util.find_spec("faster_whisper"),
                          "faster-whisper and PyAV are not installed")

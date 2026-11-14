@@ -22,10 +22,17 @@ def _model(model_path: str):
     return WhisperModel(model_path, device="cpu", compute_type="int8", local_files_only=True)
 
 
-def transcribe(audio: Path, model_path: str) -> tuple[list[Word], str]:
+def transcribe(audio: Path, model_path: str, language: str | None = None) -> tuple[list[Word], str]:
+    if language not in {None, "fa", "en"}:
+        raise ValueError("زبان انتخاب‌شده معتبر نیست.")
     with _model_lock:
-        segments, info = _model(model_path).transcribe(
-            str(audio), word_timestamps=True, vad_filter=True,
+        model = _model(model_path)
+        if not getattr(getattr(model, "model", None), "is_multilingual", True) and language != "en":
+            raise ValueError("مدل نصب‌شده فقط انگلیسی است؛ برای فارسی یا تشخیص خودکار مدل چندزبانه نصب کن.")
+        segments, info = model.transcribe(
+            str(audio), language=language, word_timestamps=True, vad_filter=True,
+            vad_parameters={"threshold": 0.4, "min_silence_duration_ms": 1000, "speech_pad_ms": 400},
+            beam_size=8, language_detection_segments=3, language_detection_threshold=0.8,
         )
         words = []
         for segment in segments:

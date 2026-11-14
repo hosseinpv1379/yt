@@ -38,13 +38,15 @@ def probe(path: Path) -> dict:
 
 def render(source: Path, output: Path, mode: str, color: str, model_path: str,
            fonts_dir: Path, cancelled, progress, grade_settings: GradeSettings | None = None,
-           timeout: int = 1800) -> tuple[dict, str | None, bool]:
+           timeout: int = 1800, language: str | None = None) -> tuple[dict, str | None, bool]:
     meta = probe(source)
-    words, language = [], None
+    words = []
     if mode in {"caption", "both"} and meta["audio"]:
         progress("در حال تشخیص گفتار…")
-        words, language = transcribe(source, model_path)
-        progress(f"زبان تشخیص‌داده‌شده: {language}")
+        selected_language = language
+        words, language = transcribe(source, model_path, selected_language)
+        language_name = {"fa": "فارسی", "en": "انگلیسی"}.get(language, language)
+        progress(f"زبان {'انتخاب‌شده' if selected_language else 'تشخیص‌داده‌شده'}: {language_name}")
     if cancelled.is_set():
         raise InterruptedError("لغو شد")
     ass_path = output.parent / "captions.ass"

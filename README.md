@@ -155,7 +155,7 @@ Image از Deno و بستهٔ `yt-dlp-ejs` هم استفاده می‌کند؛ �
 - PostgreSQL اطلاعات کاربر تلگرام، موجودی کیف پول، دفتر تراکنش تغییرناپذیر، درخواست‌های شارژ و رسیدها، نرخ‌های پنل، jobها، متن SRT و لینک‌های دانلود را نگه می‌دارد. مقادیر API key و cookies در دیتابیس ذخیره نمی‌شوند. فایل موقت job پس از ارسال یا خطا پاک می‌شود؛ ویدیوهای حجیم تا TTL در volume می‌مانند.
 - jobهایی که هنگام restart در صف یا در حال اجرا بوده‌اند با وضعیت `interrupted` ثبت می‌شوند و مبلغشان به‌طور اتمیک به کیف پول برمی‌گردد؛ job به‌صورت خودکار از ابتدا اجرا نمی‌شود.
 - دیتابیس پورت عمومی ندارد و فقط ربات به آن دسترسی شبکه‌ای دارد.
-- گزینهٔ «زیرنویس و بهبود رنگ ویدیو» ویدیوی تلگرامی تا ۲۰ مگابایت و ۹۰ ثانیه را می‌پذیرد، از تعرفهٔ دقیقه‌ای زیرنویس کیف پول یا بستهٔ زیرنویس استفاده می‌کند و در صورت شکست هزینه یا دقیقه‌ها را برمی‌گرداند. تشخیص گفتار محلی است و مدل باید پیشاپیش نصب شود؛ نوع پردازش و رنگ بعد از ارسال ویدیو انتخاب می‌شوند.
+- گزینهٔ «زیرنویس و بهبود رنگ ویدیو» ویدیوی تلگرامی تا ۲۰ مگابایت و ۹۰ ثانیه را می‌پذیرد، از تعرفهٔ دقیقه‌ای زیرنویس کیف پول یا بستهٔ زیرنویس استفاده می‌کند و در صورت شکست هزینه یا دقیقه‌ها را برمی‌گرداند. تشخیص گفتار محلی است و مدل باید پیشاپیش نصب شود؛ نوع پردازش، زبان گفتار و رنگ بعد از ارسال ویدیو انتخاب می‌شوند.
 - دوبله و زیرنویس برای YouTube هستند. لینک عمومی Instagram، TikTok، X/Twitter، Facebook، Vimeo، Dailymotion، Reddit، Aparat و SoundCloud برای دانلود پذیرفته می‌شود؛ دسترسی واقعی به extractor، منطقه، محدودیت سایت و عمومی‌بودن محتوا بستگی دارد.
 - برای لینک پست، ریلز، استوری یا هایلایت Instagram یک گزینهٔ «دانلود هوشمند» نمایش داده می‌شود. ربات خودش نوع عکس، ویدیو یا کاروسل ترکیبی را تشخیص می‌دهد؛ عکس‌های تکی به‌صورت عکس تلگرامی و چند مدیا در ZIP ارسال می‌شوند. بالاترین وضوح موجود از Instagram انتخاب می‌شود. برای لینک مستقیم پروفایل نیز گزینهٔ جداگانهٔ دانلود عکس پروفایل با وضوح HD موجود است. Story، Highlight و پروفایل‌های خصوصی به نشست معتبر نیاز دارند و ممکن است با تغییرات Instagram یا محدودیت دسترسی از کار بیفتند. محتوای خصوصی، حذف‌شده یا منقضی‌شده قابل‌بازیابی نیست.
 - برای تک‌آهنگ Spotify، پس از اطلاع به کاربر متادیتا خوانده و یک نسخهٔ مشابه در YouTube جست‌وجو می‌شود؛ فایل از Spotify دریافت نمی‌شود و نتیجه ممکن است نسخهٔ متفاوتی باشد. آلبوم، پلی‌لیست و پادکست Spotify پشتیبانی نمی‌شوند.
@@ -216,11 +216,11 @@ cat ytbot-backup.sql | docker compose exec -T database psql -U ytbot -d ytbot
 
 ```sh
 docker compose build bot
-docker compose run --rm --no-deps --entrypoint python bot -c 'from faster_whisper.utils import download_model; download_model("small", output_dir="/data/models/whisper-small")'
+docker compose run --rm --no-deps --entrypoint python bot -c 'from faster_whisper.utils import download_model; download_model("medium", output_dir="/data/models/whisper-medium")'
 docker compose up -d bot
 ```
 
-اگر سرور به اینترنت مدل دسترسی ندارد، پوشهٔ مدل CTranslate2 شامل `model.bin`، `config.json`، tokenizer و vocabulary را روی یک دستگاه متصل دانلود کن و به مسیر `/data/models/whisper-small` در volume ربات منتقل کن. `CAPTION_MODEL_PATH` مسیر مدل در کانتینر و `CAPTION_FONTS_DIR` مسیر فونت‌هاست. `CAPTION_BACKGROUND_BRIGHTNESS`، `CAPTION_BACKGROUND_SATURATION`، `CAPTION_SUBJECT_SATURATION`، `CAPTION_CONTRAST` و `CAPTION_MASK_SMOOTHING` شدت رنگ و هموارسازی ماسک را تنظیم می‌کنند.
+پیش‌فرض جدید مدل چندزبانهٔ `medium` است؛ برای نسخه‌های قبلی که `small` را نصب کرده‌اند باید دستور دانلود بالا یک بار اجرا شود. اگر سرور به اینترنت مدل دسترسی ندارد، پوشهٔ مدل CTranslate2 شامل `model.bin`، `config.json`، tokenizer و vocabulary را روی یک دستگاه متصل دانلود کن و به مسیر `/data/models/whisper-medium` در volume ربات منتقل کن. پردازش `medium` روی CPU حافظه و زمان بیشتری می‌خواهد؛ برای استفاده از مدل قبلی، `CAPTION_MODEL_PATH=/data/models/whisper-small` را در `.env` قرار بده. اگر این متغیر قبلاً در `.env` روی مسیر `small` تنظیم شده، برای استفاده از مدل جدید آن را به `/data/models/whisper-medium` تغییر بده. `CAPTION_FONTS_DIR` مسیر فونت‌هاست. `CAPTION_BACKGROUND_BRIGHTNESS`، `CAPTION_BACKGROUND_SATURATION`، `CAPTION_SUBJECT_SATURATION`، `CAPTION_CONTRAST` و `CAPTION_MASK_SMOOTHING` شدت رنگ و هموارسازی ماسک را تنظیم می‌کنند.
 
 برای اجرای مستقیم روی Ubuntu، Python 3.12 و بسته‌های سیستمی را نصب کن:
 
@@ -228,13 +228,13 @@ docker compose up -d bot
 sudo apt-get update
 sudo apt-get install -y ffmpeg libass9 libharfbuzz0b fonts-vazirmatn fonts-montserrat libgl1 libglib2.0-0
 python3 -m pip install -r requirements.txt
-mkdir -p assets/fonts models/whisper-small
+mkdir -p assets/fonts models/whisper-medium
 cp "$(fc-match -f '%{file}' 'Vazirmatn:style=Bold')" assets/fonts/Vazirmatn-Bold.ttf
 cp "$(fc-match -f '%{file}' 'Montserrat:style=ExtraBold')" assets/fonts/Montserrat-ExtraBold.ttf
-python3 -c 'from faster_whisper.utils import download_model; download_model("small", output_dir="models/whisper-small")'
+python3 -c 'from faster_whisper.utils import download_model; download_model("medium", output_dir="models/whisper-medium")'
 ```
 
-برای اجرای مستقیم، `CAPTION_MODEL_PATH` را به مسیر مطلق `models/whisper-small` و `CAPTION_FONTS_DIR` را به مسیر مطلق `assets/fonts` در `.env` تنظیم کن. با `ffmpeg -filters | grep -E ' (ass|subtitles) '` وجود libass و با `ldd /usr/lib/x86_64-linux-gnu/libass.so.9 | grep harfbuzz` اتصال HarfBuzz را بررسی کن؛ در صورت نبودشان FFmpeg و libass توزیع را نصب یا با این قابلیت‌ها بازسازی کن.
+برای اجرای مستقیم، `CAPTION_MODEL_PATH` را به مسیر مطلق `models/whisper-medium` و `CAPTION_FONTS_DIR` را به مسیر مطلق `assets/fonts` در `.env` تنظیم کن. با `ffmpeg -filters | grep -E ' (ass|subtitles) '` وجود libass و با `ldd /usr/lib/x86_64-linux-gnu/libass.so.9 | grep harfbuzz` اتصال HarfBuzz را بررسی کن؛ در صورت نبودشان FFmpeg و libass توزیع را نصب یا با این قابلیت‌ها بازسازی کن.
 
 برای بررسی دستی، ویدیوی ۱۰ ثانیه‌ای دارای گفتار فارسی یا انگلیسی را در خدمت جدید بفرست، «هر دو» و یک رنگ را انتخاب و هزینه را تأیید کن. در خروجی ترتیب کلمات، اتصال حروف فارسی، رنگ کلمهٔ فعال، صدای اصلی و ظاهر لبهٔ سوژه را ببین؛ سپس با ویدیوی بی‌گفتار و گزینهٔ فقط رنگ نیز امتحان کن. MediaPipe Selfie Segmentation برای انسان طراحی شده است؛ اشیای دیگر ممکن است شناسایی نشوند و در نبود ماسک، اصلاح سراسری استفاده می‌شود. پردازش فریم‌ها با نرخ فریم ثابت انجام می‌شود و ویدیوهای دارای نرخ متغیر ممکن است زمان‌بندی متفاوتی داشته باشند.
 
