@@ -13,15 +13,19 @@ from pathlib import Path
 from openai import RateLimitError
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.constants import ChatAction
-from telegram.error import NetworkError, TelegramError
+from telegram.error import BadRequest, NetworkError, TelegramError
 from telegram.ext import Application, CallbackQueryHandler, CommandHandler, ContextTypes, MessageHandler, filters
 
 from .config import Settings, load_settings
 from .database import Database
 from .openai_limits import ModelLimit, OpenAILimitsUnavailable, get_openai_limits
 from . import ui, model_catalog, image_generation
-from .downloads import classify_link, download_media, is_instagram_media_url, resolve_spotify_track
+from .downloads import (
+    classify_link, download_media, is_instagram_media_url, is_instagram_profile_url,
+    resolve_spotify_track,
+)
 from .content import edit_subtitle_line, generate_content
+from features.video_captions.handlers import VideoCaptionJob, register as register_video_captions, run_job as run_video_caption_job
 from .pipeline import (
     JobCancelled,
     OpenAICost,
@@ -184,6 +188,9 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not user or not message:
         return
     state = _state(context)
+    video_pending = context.application.bot_data.get("video_captions_pending", {})
+    if not video_pending.get(user.id, {}).get("confirming"):
+        video_pending.pop(user.id, None)
     if message.chat.type != "private":
         await message.reply_text("برای حفظ حریم خصوصی، ربات را در گفت‌وگوی خصوصی باز کن.")
         return
@@ -282,7 +289,10 @@ async def receive_link(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         else:
             text = "📥 دانلود فایل\n\nنوع خروجی را انتخاب کن. این مسیر فقط دانلود است و هزینهٔ پردازش ندارد."
             buttons = []
-            if is_instagram_media_url(url):
+            if is_instagram_profile_url(url):
+                text = "🖼 دانلود عکس پروفایل اینستاگرام\n\nعکس پروفایل را با بالاترین وضوحی که از اینستاگرام در دسترس باشد دریافت می‌کنم."
+                buttons.append([ui.button("⬇️ دانلود عکس پروفایل", f"dl:{token}:profile", style="primary")])
+            elif is_instagram_media_url(url):
                 text = "📥 دانلود اینستاگرام\n\nنوع مدیا را خودکار تشخیص می‌دهم و با قالب مناسب می‌فرستم: عکس، ویدیو، ریلز، استوری یا کاروسل. چند مدیا در یک فایل ZIP قرار می‌گیرد."
                 buttons.append([ui.button("⬇️ دانلود هوشمند", f"dl:{token}:media", style="primary")])
             else:
@@ -316,9 +326,11 @@ async def choose_download(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     selection = state.pending_quality.get(token)
     if (not selection or selection.user_id != user.id or selection.confirming
             or selection.download_source not in {"social", "spotify"}
-            or kind not in {"video", "audio", "media"}
+            or kind not in {"video", "audio", "media", "profile"}
             or (kind == "media" and (selection.download_source != "social" or not is_instagram_media_url(selection.url)))
+            or (kind == "profile" and (selection.download_source != "social" or not is_instagram_profile_url(selection.url)))
             or (is_instagram_media_url(selection.url) and kind != "media")
+            or (is_instagram_profile_url(selection.url) and kind != "profile")
             or (selection.download_source == "spotify" and kind != "audio")):
         await query.answer("این انتخاب دیگر معتبر نیست.", show_alert=True)
         return
@@ -661,6 +673,14 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     state = _state(context)
     if not user or not message:
         return
+    caption_pending = context.application.bot_data.get("video_captions_pending", {}).get(user.id)
+    if caption_pending:
+        if caption_pending.get("confirming"):
+            await message.reply_text("در حال ثبت سفارش هستیم؛ چند لحظه صبر کن.")
+            return
+        context.application.bot_data["video_captions_pending"].pop(user.id, None)
+        await message.reply_text("درخواست ویرایش ویدیو لغو شد.", reply_markup=ui.back_keyboard())
+        return
     await state.database.upsert_user(user, True)
     if state.subtitle_editing.pop(user.id, None):
         await message.reply_text("ویرایش زیرنویس لغو شد.", reply_markup=ui.back_keyboard())
@@ -704,7 +724,7 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         return
     job = state.active.get(user.id)
     if job:
-        if isinstance(job, (Job, ImageJob)) and job.delivery_started:
+        if isinstance(job, (Job, ImageJob, VideoCaptionJob)) and job.delivery_started:
             await message.reply_text("خروجی در حال تحویل است و دیگر نمی‌توان این سفارش را لغو کرد.", reply_markup=ui.back_keyboard())
             return
         job.cancel_event.set()
@@ -721,7 +741,7 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 def _cancel_requested_text(job: Job | DownloadJob | ContentJob | ImageJob) -> str:
     if isinstance(job, DownloadJob):
         return "درخواست لغو ثبت شد؛ پس از پایان مرحلهٔ فعلی دانلود متوقف می‌شود."
-    if isinstance(job, Job) and job.package_minutes:
+    if isinstance(job, (Job, VideoCaptionJob)) and job.package_minutes:
         return "درخواست لغو ثبت شد؛ پس از توقف، دقیقهٔ مصرف‌شده به بسته برمی‌گردد."
     return "درخواست لغو ثبت شد؛ پس از توقف، هزینه طبق نتیجهٔ بازپرداخت به کیف پول برمی‌گردد."
 
@@ -735,7 +755,7 @@ async def cancel_job_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
     if not job or job.id != job_id:
         await query.answer("این سفارش دیگر فعال نیست.", show_alert=True)
         return
-    if isinstance(job, (Job, ImageJob)) and job.delivery_started:
+    if isinstance(job, (Job, ImageJob, VideoCaptionJob)) and job.delivery_started:
         await query.answer("خروجی در حال تحویل است و لغو دیگر ممکن نیست.", show_alert=True)
         return
     if job.cancel_event.is_set():
@@ -1438,6 +1458,9 @@ async def menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     action = (query.data or "").partition(":")[2]
     await query.answer()
     state = _state(context)
+    pending_video = context.application.bot_data.get("video_captions_pending", {})
+    if not pending_video.get(user.id, {}).get("confirming"):
+        pending_video.pop(user.id, None)
     state.awaiting_image_prompt.discard(user.id)
     state.image_references.pop(user.id, None)
     state.subtitle_editing.pop(user.id, None)
@@ -1468,14 +1491,14 @@ async def menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     elif action == "status":
         if user.id in state.active:
             job = state.active[user.id]
-            label = ("دانلود" if isinstance(job, DownloadJob) else "ساخت تصویر" if isinstance(job, ImageJob) else "محتوای تکمیلی" if isinstance(job, ContentJob) else
+            label = ("زیرنویس و اصلاح رنگ" if isinstance(job, VideoCaptionJob) else "دانلود" if isinstance(job, DownloadJob) else "ساخت تصویر" if isinstance(job, ImageJob) else "محتوای تکمیلی" if isinstance(job, ContentJob) else
                      "زیرنویس" if job.mode == "subtitle" else "دوبله")
             await _edit_query_screen(query,
                 f"📦 سفارش فعال\n\nنوع: {label}\nشمارهٔ سفارش: {job.id[:8]}\n"
                 + ((_progress_text(job.progress_stage, job.progress_percent) + "\nدرصد تقریبی مراحل پردازش است.")
                    if isinstance(job, Job) else "وضعیت در پیام سفارش نمایش داده می‌شود.")
                 + ("\n⏳ درخواست لغو در حال انجام است." if job.cancel_event.is_set() else ""),
-                reply_markup=ui.job_keyboard(job.id, cancellable=not isinstance(job, (Job, ImageJob)) or not job.delivery_started))
+                reply_markup=ui.job_keyboard(job.id, cancellable=not isinstance(job, (Job, ImageJob, VideoCaptionJob)) or not job.delivery_started))
         elif user.id in state.pending_by_user:
             token = state.pending_by_user[user.id]
             await _edit_query_screen(query, "📦 سفارش هنوز در مرحلهٔ انتخاب است. آن را ادامه بده یا لغو کن.",
@@ -1731,9 +1754,11 @@ ORDER_STATUS = {"queued": "در صف", "running": "در حال پردازش", "c
 
 def _order_kind(category: str, kind: str) -> str:
     if category == "processing":
+        if kind == "caption_video":
+            return "زیرنویس و اصلاح رنگ ویدیوی ارسالی"
         return "زیرنویس فارسی" if kind == "subtitle" else "دوبلهٔ فارسی"
     if category == "download":
-        return {"audio": "فایل صوتی", "media": "مدیای اینستاگرام"}.get(kind, "ویدیو")
+        return {"audio": "فایل صوتی", "media": "مدیای اینستاگرام", "profile": "عکس پروفایل اینستاگرام"}.get(kind, "ویدیو")
     return "خلاصه و جزوه" if kind == "summary" else "بستهٔ تولید محتوا"
 
 
@@ -1829,7 +1854,8 @@ async def orders_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             elif order.get('amount') is not None:
                 text += f"\nهزینه: {order['amount']:,} تومان"
         if category in {"processing", "download"} and order.get('source_url'):
-            text += f"\nمنبع: {order['source_url'][:500]}"
+            source = "ویدیوی ارسالی تلگرام" if order['source_url'] == "telegram-upload" else order['source_url'][:500]
+            text += f"\nمنبع: {source}"
         if category == "download" and order.get('title'):
             text += f"\nعنوان: {order['title']}"
         buttons = []
@@ -1849,7 +1875,7 @@ async def orders_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
                 text += "\n\nبرای این سفارش لینک ذخیره نشده؛ فایل ممکن است مستقیماً در چت ارسال شده باشد."
         if category == "content" and order['status'] == "completed":
             buttons.append([ui.button("⬇️ دریافت خروجی", f"content:result:{order_id}", style="primary")])
-        if category == "processing" and order['status'] == "completed":
+        if category == "processing" and order['status'] == "completed" and order['kind'] != "caption_video":
             buttons.append([ui.button("📝 خروجی‌های تکمیلی و ویرایش", f"content:job:{order_id}")])
         buttons.append([ui.button("‹ بازگشت", f"orders:list:{category}:{page}")])
         await query.answer()
@@ -2503,6 +2529,8 @@ async def _run_download_job(application: Application, state: BotState, job: Down
             await _safe_progress(application, job, "🔎 جست‌وجوی نسخهٔ مشابه در YouTube…")
             url, title = await asyncio.to_thread(resolve_spotify_track, url, state.settings)
             await _safe_progress(application, job, f"🎵 نسخهٔ پیدا شده: {title}\nدر حال دریافت از YouTube…")
+        elif is_instagram_profile_url(url):
+            await _safe_progress(application, job, "🔎 در حال پیدا کردن عکس پروفایل با بالاترین وضوح…")
         elif is_instagram_media_url(url):
             await _safe_progress(application, job, "🔎 در حال تشخیص خودکار نوع مدیای اینستاگرام و دریافت آن…")
         else:
@@ -2522,7 +2550,9 @@ async def _run_download_job(application: Application, state: BotState, job: Down
             "png": "🖼 عکس اینستاگرام",
             "webp": "🖼 عکس اینستاگرام",
             "avif": "🖼 عکس اینستاگرام",
-        }.get(output_extension, "📥 مدیای اینستاگرام") if job.kind == "media" else ""
+        }.get(output_extension, "📥 مدیای اینستاگرام") if job.kind == "media" else (
+            "🖼 عکس پروفایل اینستاگرام" if job.kind == "profile" else ""
+        )
         caption_prefix = f"{media_label}\n" if media_label else ""
         caption = f"{caption_prefix}✅ {title}" + ("\nنسخهٔ یافت‌شده در YouTube؛ ممکن است با نسخهٔ Spotify متفاوت باشد." if job.source == "spotify" else "")
         if output.stat().st_size <= 48_000_000:
@@ -2531,6 +2561,12 @@ async def _run_download_job(application: Application, state: BotState, job: Down
                     await application.bot.send_audio(job.chat_id, media, caption=caption, read_timeout=120, write_timeout=120)
                 elif output_extension == "mp4":
                     await application.bot.send_video(job.chat_id, media, caption=caption, supports_streaming=True, read_timeout=120, write_timeout=120)
+                elif output_extension in {"jpg", "jpeg", "png"} and output.stat().st_size <= 10_000_000:
+                    try:
+                        await application.bot.send_photo(job.chat_id, media, caption=caption, read_timeout=120, write_timeout=120)
+                    except BadRequest:
+                        media.seek(0)
+                        await application.bot.send_document(job.chat_id, media, filename=output.name, caption=caption, read_timeout=120, write_timeout=120)
                 else:
                     await application.bot.send_document(job.chat_id, media, filename=output.name, caption=caption, read_timeout=120, write_timeout=120)
         elif state.settings.download_base_url:
@@ -2590,6 +2626,9 @@ async def worker(application: Application) -> None:
             continue
         if isinstance(job, ImageJob):
             await _run_image_job(application, state, job)
+            continue
+        if isinstance(job, VideoCaptionJob):
+            await run_video_caption_job(application, state, job)
             continue
         progress_queue: asyncio.Queue[tuple[str, int] | None] | None = None
         progress_task: asyncio.Task | None = None
@@ -3143,6 +3182,7 @@ def main() -> None:
         .build()
     )
     application.bot_data["settings"] = settings
+    register_video_captions(application)
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("team", team_command))
     application.add_handler(CommandHandler("team_create", team_create))

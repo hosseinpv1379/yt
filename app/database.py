@@ -766,7 +766,8 @@ class Database:
             rows = (await session.scalars(select(model).where(owner == user_id)
                 .order_by(model.created_at.desc(), model.id.desc()).offset(max(0, offset)).limit(limit))).all()
             return [{"id": row.id, "status": row.status, "created_at": row.created_at,
-                     "kind": row.mode if category == "processing" else row.kind} for row in rows]
+                     "kind": ("caption_video" if row.source_url == "telegram-upload" else row.mode)
+                     if category == "processing" else row.kind} for row in rows]
 
     async def get_owned_order(self, user_id: int, category: str, order_id: str) -> dict | None:
         if category == "processing":
@@ -782,7 +783,8 @@ class Database:
             if not row:
                 return None
             result = {"id": row.id, "status": row.status, "created_at": row.created_at,
-                      "kind": row.mode if category == "processing" else row.kind}
+                      "kind": ("caption_video" if row.source_url == "telegram-upload" else row.mode)
+                      if category == "processing" else row.kind}
             if category == "processing":
                 result.update(source_url=row.source_url, minutes=row.billable_minutes,
                               amount=row.billed_amount_toman, package_minutes=row.package_minutes)

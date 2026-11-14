@@ -6,16 +6,16 @@
     "semantic_hash": "882b739000d5033207c8479d62b2ce17"
   },
   "app/bot.py": {
-    "mtime": 1794658601.749386,
-    "seen": 1794658624.478422,
-    "ast_hash": "c29dd9b36835c8a73b878b3326848907",
+    "mtime": 1794660725.5336928,
+    "seen": 1794660754.026037,
+    "ast_hash": "153fe47a98197bfa99f1f15b50479512",
     "semantic_hash": ""
   },
   "app/config.py": {
-    "mtime": 1794474695.336265,
-    "seen": 1794510547.58863,
-    "ast_hash": "5a4f06081b46275773f55a8c51bbdba4",
-    "semantic_hash": "5a4f06081b46275773f55a8c51bbdba4"
+    "mtime": 1794660439.40304,
+    "seen": 1794660672.921649,
+    "ast_hash": "d2b76d5b3487b1e59b920bab0a8e2000",
+    "semantic_hash": ""
   },
   "app/content.py": {
     "mtime": 1794460335.6867409,
@@ -24,15 +24,15 @@
     "semantic_hash": "3f37474f78a6905753a70b9ee79a6fd1"
   },
   "app/database.py": {
-    "mtime": 1794485442.2643707,
-    "seen": 1794510547.5886312,
-    "ast_hash": "9e39c3ed171676c7ee1ab2c591299c76",
-    "semantic_hash": "9e39c3ed171676c7ee1ab2c591299c76"
+    "mtime": 1794660635.5197423,
+    "seen": 1794660672.921652,
+    "ast_hash": "61974d6fb1a54448905190f1b8dd573a",
+    "semantic_hash": ""
   },
   "app/downloads.py": {
-    "mtime": 1794658485.0766706,
-    "seen": 1794658490.6446998,
-    "ast_hash": "76fef373c3b307afea23e7884af28685",
+    "mtime": 1794660165.340639,
+    "seen": 1794660672.921652,
+    "ast_hash": "3b2f02aa461706d8ef54abb97783cd66",
     "semantic_hash": ""
   },
   "app/image_generation.py": {
@@ -66,9 +66,9 @@
     "semantic_hash": ""
   },
   "app/ui.py": {
-    "mtime": 1794596294.8614352,
-    "seen": 1794596381.124769,
-    "ast_hash": "40e496e9eeecdad668ca6936e71eca4c",
+    "mtime": 1794660379.476119,
+    "seen": 1794660672.921657,
+    "ast_hash": "0d143b5879b9edd47eef4c1d68f18f22",
     "semantic_hash": ""
   },
   "separator/server.py": {
@@ -168,9 +168,9 @@
     "semantic_hash": ""
   },
   "README.md": {
-    "mtime": 1794658607.9162214,
-    "seen": 1794658624.478442,
-    "ast_hash": "ddebf713c54242a61044eb4e99f9fa0f",
+    "mtime": 1794660737.6351109,
+    "seen": 1794660754.0260632,
+    "ast_hash": "48a3dc48305b16eed819197ec5006a3f",
     "semantic_hash": ""
   },
   "docker-compose.https.yml": {
@@ -180,15 +180,69 @@
     "semantic_hash": ""
   },
   "docker-compose.yml": {
-    "mtime": 1794474743.1283455,
-    "seen": 1794510573.216892,
-    "ast_hash": "a478ffbd61e86a1fa7547d1f8706c167",
+    "mtime": 1794660439.4299006,
+    "seen": 1794660672.921676,
+    "ast_hash": "8763b798723cc9cecd134a609a013138",
     "semantic_hash": ""
   },
   "requirements.txt": {
-    "mtime": 1794416272.541353,
-    "seen": 1794510573.216893,
-    "ast_hash": "46b471e7e7dc8f5a361c776f8abbef29",
+    "mtime": 1794660393.0271394,
+    "seen": 1794660672.921677,
+    "ast_hash": "e408d04490c98e9ca8b6d0a9ab6bc2b2",
+    "semantic_hash": ""
+  },
+  "features/__init__.py": {
+    "mtime": 1794660292.4106462,
+    "seen": 1794660672.921658,
+    "ast_hash": "5bfc0d248a7e2da7fbbc19303b59fcdf",
+    "semantic_hash": ""
+  },
+  "features/video_captions/__init__.py": {
+    "mtime": 1794660292.4392042,
+    "seen": 1794660672.921659,
+    "ast_hash": "40ce26c6d04bda32627de63fec325573",
+    "semantic_hash": ""
+  },
+  "features/video_captions/ass_builder.py": {
+    "mtime": 1794660439.4537876,
+    "seen": 1794660672.921659,
+    "ast_hash": "00eadbd326d3723ef0bce5e76b2d1464",
+    "semantic_hash": ""
+  },
+  "features/video_captions/grading.py": {
+    "mtime": 1794660644.6477175,
+    "seen": 1794660672.92166,
+    "ast_hash": "9d860a3af3fc0c863598772789dac6b6",
+    "semantic_hash": ""
+  },
+  "features/video_captions/handlers.py": {
+    "mtime": 1794660725.5020666,
+    "seen": 1794660754.0260491,
+    "ast_hash": "e64990699bf187c6e49686529a6340ae",
+    "semantic_hash": ""
+  },
+  "features/video_captions/pipeline.py": {
+    "mtime": 1794660644.6773405,
+    "seen": 1794660672.921661,
+    "ast_hash": "f167184929612a9eabaf57e7c1e8ee48",
+    "semantic_hash": ""
+  },
+  "features/video_captions/transcribe.py": {
+    "mtime": 1794660292.4733748,
+    "seen": 1794660672.9216619,
+    "ast_hash": "0096d7c8b8f4fc9eb51201b0f319646d",
+    "semantic_hash": ""
+  },
+  "tests/test_video_captions.py": {
+    "mtime": 1794660615.329229,
+    "seen": 1794660672.921673,
+    "ast_hash": "ee0fc9830508c9bc5b8763275b5d6bf4",
+    "semantic_hash": ""
+  },
+  "assets/fonts/README.md": {
+    "mtime": 1794660527.6401575,
+    "seen": 1794660672.921675,
+    "ast_hash": "c4f22736f7e9a1c18055d1b49b3a8976",
     "semantic_hash": ""
   }
 }

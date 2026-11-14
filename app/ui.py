@@ -18,6 +18,7 @@ def home_keyboard() -> InlineKeyboardMarkup:
 
 def services_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
+        [button('🎬 زیرنویس و بهبود رنگ ویدیو', 'vclip:start', style='primary')],
         [button('🎨 ساخت تصویر', 'image:start', style='primary')],
         [button('📝 خلاصه و محتوای تکمیلی', 'content:list')],
         [button('🎟 بسته‌های دقیقه', 'packs:list')],
