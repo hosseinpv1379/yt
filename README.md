@@ -212,6 +212,8 @@ cat ytbot-backup.sql | docker compose exec -T database psql -U ytbot -d ytbot
 
 در Docker فایل‌های فونت Vazirmatn Bold و Montserrat ExtraBold هنگام ساخت ایمیج در `/app/assets/fonts` قرار می‌گیرند و پشتیبانی `ass` و HarfBuzz بررسی می‌شود. مدل faster-whisper باید یک بار با اتصال اینترنت روی volume پایدار دانلود شود؛ هنگام پردازش از مسیر محلی خوانده می‌شود و به API گفتار متصل نمی‌شود:
 
+وابستگی‌های گفتار از `faster-whisper==1.2.1` و `av<19` استفاده می‌کنند؛ PyAV 19 پارامتری را که این نسخهٔ faster-whisper برای خواندن صوت نیاز دارد حذف کرده است. هنگام ساخت ایمیج یک نمونهٔ صوتی کوتاه با دیکودر واقعی بررسی می‌شود. پس از تغییر وابستگی‌ها ایمیج bot را دوباره بساز؛ مدل ذخیره‌شده در volume نیازی به دانلود مجدد ندارد.
+
 ```sh
 docker compose build bot
 docker compose run --rm --no-deps --entrypoint python bot -c 'from faster_whisper.utils import download_model; download_model("small", output_dir="/data/models/whisper-small")'

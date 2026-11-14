@@ -1,10 +1,13 @@
 import sys
+import importlib.util
+import io
 import shutil
 import subprocess
 import tempfile
 import threading
 import types
 import unittest
+import wave
 from pathlib import Path
 from unittest.mock import patch
 
@@ -60,6 +63,19 @@ class TranscriptionTests(unittest.TestCase):
         self.assertTrue(calls[0][1]["local_files_only"])
         self.assertEqual(model.options, {"word_timestamps": True, "vad_filter": True})
         self.assertEqual((first[0].text, language), ("hello", "en"))
+
+    @unittest.skipUnless(importlib.util.find_spec("av") and importlib.util.find_spec("faster_whisper"),
+                         "faster-whisper and PyAV are not installed")
+    def test_faster_whisper_decodes_real_wav(self):
+        from faster_whisper.audio import decode_audio
+        audio = io.BytesIO()
+        with wave.open(audio, "wb") as wav:
+            wav.setnchannels(1)
+            wav.setsampwidth(2)
+            wav.setframerate(16000)
+            wav.writeframes(bytes(3200))
+        audio.seek(0)
+        self.assertEqual(len(decode_audio(audio)), 1600)
 
 
 class ProbeTests(unittest.TestCase):

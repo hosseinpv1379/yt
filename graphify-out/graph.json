@@ -4,32 +4,6 @@
   "graph": {},
   "nodes": [
     {
-      "id": "app_bot_contentjob",
-      "label": "ContentJob",
-      "_callable": true,
-      "_callable_class": true,
-      "_origin": "ast",
-      "community": 0,
-      "community_name": "bot.py",
-      "file_type": "code",
-      "norm_label": "contentjob",
-      "source_file": "app/bot.py",
-      "source_location": "L91"
-    },
-    {
-      "id": "features_video_captions_handlers_videocaptionjob",
-      "label": "VideoCaptionJob",
-      "_callable": true,
-      "_callable_class": true,
-      "_origin": "ast",
-      "community": 0,
-      "community_name": "bot.py",
-      "file_type": "code",
-      "norm_label": "videocaptionjob",
-      "source_file": "features/video_captions/handlers.py",
-      "source_location": "L24"
-    },
-    {
       "id": "app_bot_botstate",
       "label": "BotState",
       "_callable": true,
@@ -41,32 +15,6 @@
       "norm_label": "botstate",
       "source_file": "app/bot.py",
       "source_location": "L137"
-    },
-    {
-      "id": "app_bot_downloadjob",
-      "label": "DownloadJob",
-      "_callable": true,
-      "_callable_class": true,
-      "_origin": "ast",
-      "community": 1,
-      "community_name": "BotState",
-      "file_type": "code",
-      "norm_label": "downloadjob",
-      "source_file": "app/bot.py",
-      "source_location": "L78"
-    },
-    {
-      "id": "app_bot_imagejob",
-      "label": "ImageJob",
-      "_callable": true,
-      "_callable_class": true,
-      "_origin": "ast",
-      "community": 1,
-      "community_name": "BotState",
-      "file_type": "code",
-      "norm_label": "imagejob",
-      "source_file": "app/bot.py",
-      "source_location": "L103"
     },
     {
       "id": "app_bot_pendingquality",
@@ -108,19 +56,6 @@
       "source_location": "L18"
     },
     {
-      "id": "tests_test_downloads_downloaddeliverytests",
-      "label": "DownloadDeliveryTests",
-      "_callable": true,
-      "_callable_class": true,
-      "_origin": "ast",
-      "community": 1,
-      "community_name": "BotState",
-      "file_type": "code",
-      "norm_label": "downloaddeliverytests",
-      "source_file": "tests/test_downloads.py",
-      "source_location": "L71"
-    },
-    {
       "id": "tests_test_downloads_downloadordertests",
       "label": "DownloadOrderTests",
       "_callable": true,
@@ -134,58 +69,6 @@
       "source_location": "L58"
     },
     {
-      "id": "tests_test_dub_mixing_dubmixingtests",
-      "label": "DubMixingTests",
-      "_callable": true,
-      "_callable_class": true,
-      "_origin": "ast",
-      "community": 1,
-      "community_name": "BotState",
-      "file_type": "code",
-      "norm_label": "dubmixingtests",
-      "source_file": "tests/test_dub_mixing.py",
-      "source_location": "L11"
-    },
-    {
-      "id": "tests_test_image_generation_imageflowtests",
-      "label": "ImageFlowTests",
-      "_callable": true,
-      "_callable_class": true,
-      "_origin": "ast",
-      "community": 1,
-      "community_name": "BotState",
-      "file_type": "code",
-      "norm_label": "imageflowtests",
-      "source_file": "tests/test_image_generation.py",
-      "source_location": "L50"
-    },
-    {
-      "id": "tests_test_model_settings_costdisplaytests",
-      "label": "CostDisplayTests",
-      "_callable": true,
-      "_callable_class": true,
-      "_origin": "ast",
-      "community": 1,
-      "community_name": "BotState",
-      "file_type": "code",
-      "norm_label": "costdisplaytests",
-      "source_file": "tests/test_model_settings.py",
-      "source_location": "L83"
-    },
-    {
-      "id": "tests_test_order_history_orderhistorytests",
-      "label": "OrderHistoryTests",
-      "_callable": true,
-      "_callable_class": true,
-      "_origin": "ast",
-      "community": 1,
-      "community_name": "BotState",
-      "file_type": "code",
-      "norm_label": "orderhistorytests",
-      "source_file": "tests/test_order_history.py",
-      "source_location": "L39"
-    },
-    {
       "id": "tests_test_orders_ordertests",
       "label": "OrderTests",
       "_callable": true,
@@ -197,45 +80,6 @@
       "norm_label": "ordertests",
       "source_file": "tests/test_orders.py",
       "source_location": "L10"
-    },
-    {
-      "id": "tests_test_separator_separatortests",
-      "label": "SeparatorTests",
-      "_callable": true,
-      "_callable_class": true,
-      "_origin": "ast",
-      "community": 1,
-      "community_name": "BotState",
-      "file_type": "code",
-      "norm_label": "separatortests",
-      "source_file": "tests/test_separator.py",
-      "source_location": "L12"
-    },
-    {
-      "id": "tests_test_ui_inputflowtests",
-      "label": "InputFlowTests",
-      "_callable": true,
-      "_callable_class": true,
-      "_origin": "ast",
-      "community": 1,
-      "community_name": "BotState",
-      "file_type": "code",
-      "norm_label": "inputflowtests",
-      "source_file": "tests/test_ui.py",
-      "source_location": "L18"
-    },
-    {
-      "id": "tests_test_ui_keyboardtests",
-      "label": "KeyboardTests",
-      "_callable": true,
-      "_callable_class": true,
-      "_origin": "ast",
-      "community": 1,
-      "community_name": "BotState",
-      "file_type": "code",
-      "norm_label": "keyboardtests",
-      "source_file": "tests/test_ui.py",
-      "source_location": "L9"
     },
     {
       "id": "features_video_captions_grading_grader",
@@ -264,56 +108,17 @@
       "source_location": "L6"
     },
     {
-      "id": "features_video_captions_transcribe_word",
-      "label": "Word",
+      "id": "features_video_captions_handlers_videocaptionjob",
+      "label": "VideoCaptionJob",
       "_callable": true,
       "_callable_class": true,
       "_origin": "ast",
       "community": 10,
       "community_name": "handlers.py",
       "file_type": "code",
-      "norm_label": "word",
-      "source_file": "features/video_captions/transcribe.py",
-      "source_location": "L9"
-    },
-    {
-      "id": "tests_test_video_captions_captionbuildertests",
-      "label": "CaptionBuilderTests",
-      "_callable": true,
-      "_callable_class": true,
-      "_origin": "ast",
-      "community": 10,
-      "community_name": "handlers.py",
-      "file_type": "code",
-      "norm_label": "captionbuildertests",
-      "source_file": "tests/test_video_captions.py",
-      "source_location": "L16"
-    },
-    {
-      "id": "tests_test_video_captions_probetests",
-      "label": "ProbeTests",
-      "_callable": true,
-      "_callable_class": true,
-      "_origin": "ast",
-      "community": 10,
-      "community_name": "handlers.py",
-      "file_type": "code",
-      "norm_label": "probetests",
-      "source_file": "tests/test_video_captions.py",
-      "source_location": "L65"
-    },
-    {
-      "id": "tests_test_video_captions_transcriptiontests",
-      "label": "TranscriptionTests",
-      "_callable": true,
-      "_callable_class": true,
-      "_origin": "ast",
-      "community": 10,
-      "community_name": "handlers.py",
-      "file_type": "code",
-      "norm_label": "transcriptiontests",
-      "source_file": "tests/test_video_captions.py",
-      "source_location": "L41"
+      "norm_label": "videocaptionjob",
+      "source_file": "features/video_captions/handlers.py",
+      "source_location": "L24"
     },
     {
       "id": "app_database_user",
@@ -394,82 +199,17 @@
       "source_location": "L41"
     },
     {
-      "id": "app_model_catalog_stageselection",
-      "label": "StageSelection",
-      "_callable": true,
-      "_callable_class": true,
-      "_origin": "ast",
-      "community": 17,
-      "community_name": "model_catalog.py",
-      "file_type": "code",
-      "norm_label": "stageselection",
-      "source_file": "app/model_catalog.py",
-      "source_location": "L35"
-    },
-    {
-      "id": "tests_test_image_generation_imageapitests",
-      "label": "ImageApiTests",
-      "_callable": true,
-      "_callable_class": true,
-      "_origin": "ast",
-      "community": 17,
-      "community_name": "model_catalog.py",
-      "file_type": "code",
-      "norm_label": "imageapitests",
-      "source_file": "tests/test_image_generation.py",
-      "source_location": "L13"
-    },
-    {
-      "id": "tests_test_model_settings_memorydb",
-      "label": "MemoryDB",
-      "_callable": true,
-      "_callable_class": true,
-      "_origin": "ast",
-      "community": 17,
-      "community_name": "model_catalog.py",
-      "file_type": "code",
-      "norm_label": "memorydb",
-      "source_file": "tests/test_model_settings.py",
-      "source_location": "L21"
-    },
-    {
-      "id": "tests_test_model_settings_minuteestimatetests",
-      "label": "MinuteEstimateTests",
-      "_callable": true,
-      "_callable_class": true,
-      "_origin": "ast",
-      "community": 17,
-      "community_name": "model_catalog.py",
-      "file_type": "code",
-      "norm_label": "minuteestimatetests",
-      "source_file": "tests/test_model_settings.py",
-      "source_location": "L89"
-    },
-    {
-      "id": "tests_test_model_settings_modelsettingstests",
-      "label": "ModelSettingsTests",
-      "_callable": true,
-      "_callable_class": true,
-      "_origin": "ast",
-      "community": 17,
-      "community_name": "model_catalog.py",
-      "file_type": "code",
-      "norm_label": "modelsettingstests",
-      "source_file": "tests/test_model_settings.py",
-      "source_location": "L27"
-    },
-    {
-      "id": "app_database_minutepackage",
-      "label": "MinutePackage",
+      "id": "app_database_jobrecord",
+      "label": "JobRecord",
       "_callable": true,
       "_callable_class": true,
       "_origin": "ast",
       "community": 18,
       "community_name": "WalletTransaction",
       "file_type": "code",
-      "norm_label": "minutepackage",
+      "norm_label": "jobrecord",
       "source_file": "app/database.py",
-      "source_location": "L71"
+      "source_location": "L32"
     },
     {
       "id": "app_database_wallettransaction",
@@ -485,17 +225,17 @@
       "source_location": "L205"
     },
     {
-      "id": "app_database_jobrecord",
-      "label": "JobRecord",
+      "id": "app_database_minutepackage",
+      "label": "MinutePackage",
       "_callable": true,
       "_callable_class": true,
       "_origin": "ast",
       "community": 19,
       "community_name": "test_database_integration.py",
       "file_type": "code",
-      "norm_label": "jobrecord",
+      "norm_label": "minutepackage",
       "source_file": "app/database.py",
-      "source_location": "L32"
+      "source_location": "L71"
     },
     {
       "id": "app_database_database",
@@ -524,6 +264,32 @@
       "source_location": "L161"
     },
     {
+      "id": "tests_test_model_settings_costdisplaytests",
+      "label": "CostDisplayTests",
+      "_callable": true,
+      "_callable_class": true,
+      "_origin": "ast",
+      "community": 22,
+      "community_name": "test_model_settings.py",
+      "file_type": "code",
+      "norm_label": "costdisplaytests",
+      "source_file": "tests/test_model_settings.py",
+      "source_location": "L83"
+    },
+    {
+      "id": "tests_test_ui_keyboardtests",
+      "label": "KeyboardTests",
+      "_callable": true,
+      "_callable_class": true,
+      "_origin": "ast",
+      "community": 22,
+      "community_name": "test_model_settings.py",
+      "file_type": "code",
+      "norm_label": "keyboardtests",
+      "source_file": "tests/test_ui.py",
+      "source_location": "L9"
+    },
+    {
       "id": "tests_test_order_history_orderlinktests",
       "label": "OrderLinkTests",
       "_callable": true,
@@ -535,6 +301,188 @@
       "norm_label": "orderlinktests",
       "source_file": "tests/test_order_history.py",
       "source_location": "L11"
+    },
+    {
+      "id": "tests_test_model_settings_memorydb",
+      "label": "MemoryDB",
+      "_callable": true,
+      "_callable_class": true,
+      "_origin": "ast",
+      "community": 25,
+      "community_name": "MemoryDB",
+      "file_type": "code",
+      "norm_label": "memorydb",
+      "source_file": "tests/test_model_settings.py",
+      "source_location": "L21"
+    },
+    {
+      "id": "tests_test_model_settings_minuteestimatetests",
+      "label": "MinuteEstimateTests",
+      "_callable": true,
+      "_callable_class": true,
+      "_origin": "ast",
+      "community": 25,
+      "community_name": "MemoryDB",
+      "file_type": "code",
+      "norm_label": "minuteestimatetests",
+      "source_file": "tests/test_model_settings.py",
+      "source_location": "L89"
+    },
+    {
+      "id": "tests_test_model_settings_modelsettingstests",
+      "label": "ModelSettingsTests",
+      "_callable": true,
+      "_callable_class": true,
+      "_origin": "ast",
+      "community": 25,
+      "community_name": "MemoryDB",
+      "file_type": "code",
+      "norm_label": "modelsettingstests",
+      "source_file": "tests/test_model_settings.py",
+      "source_location": "L27"
+    },
+    {
+      "id": "tests_test_video_captions_probetests",
+      "label": "ProbeTests",
+      "_callable": true,
+      "_callable_class": true,
+      "_origin": "ast",
+      "community": 26,
+      "community_name": ".test_raw_frame_render_preserves_audio",
+      "file_type": "code",
+      "norm_label": "probetests",
+      "source_file": "tests/test_video_captions.py",
+      "source_location": "L81"
+    },
+    {
+      "id": "app_bot_imagejob",
+      "label": "ImageJob",
+      "_callable": true,
+      "_callable_class": true,
+      "_origin": "ast",
+      "community": 27,
+      "community_name": "test_image_generation.py",
+      "file_type": "code",
+      "norm_label": "imagejob",
+      "source_file": "app/bot.py",
+      "source_location": "L103"
+    },
+    {
+      "id": "app_model_catalog_stageselection",
+      "label": "StageSelection",
+      "_callable": true,
+      "_callable_class": true,
+      "_origin": "ast",
+      "community": 27,
+      "community_name": "test_image_generation.py",
+      "file_type": "code",
+      "norm_label": "stageselection",
+      "source_file": "app/model_catalog.py",
+      "source_location": "L35"
+    },
+    {
+      "id": "tests_test_image_generation_imageapitests",
+      "label": "ImageApiTests",
+      "_callable": true,
+      "_callable_class": true,
+      "_origin": "ast",
+      "community": 27,
+      "community_name": "test_image_generation.py",
+      "file_type": "code",
+      "norm_label": "imageapitests",
+      "source_file": "tests/test_image_generation.py",
+      "source_location": "L13"
+    },
+    {
+      "id": "tests_test_image_generation_imageflowtests",
+      "label": "ImageFlowTests",
+      "_callable": true,
+      "_callable_class": true,
+      "_origin": "ast",
+      "community": 27,
+      "community_name": "test_image_generation.py",
+      "file_type": "code",
+      "norm_label": "imageflowtests",
+      "source_file": "tests/test_image_generation.py",
+      "source_location": "L50"
+    },
+    {
+      "id": "features_video_captions_transcribe_word",
+      "label": "Word",
+      "_callable": true,
+      "_callable_class": true,
+      "_origin": "ast",
+      "community": 28,
+      "community_name": "write_ass",
+      "file_type": "code",
+      "norm_label": "word",
+      "source_file": "features/video_captions/transcribe.py",
+      "source_location": "L9"
+    },
+    {
+      "id": "tests_test_video_captions_captionbuildertests",
+      "label": "CaptionBuilderTests",
+      "_callable": true,
+      "_callable_class": true,
+      "_origin": "ast",
+      "community": 28,
+      "community_name": "write_ass",
+      "file_type": "code",
+      "norm_label": "captionbuildertests",
+      "source_file": "tests/test_video_captions.py",
+      "source_location": "L19"
+    },
+    {
+      "id": "tests_test_dub_mixing_dubmixingtests",
+      "label": "DubMixingTests",
+      "_callable": true,
+      "_callable_class": true,
+      "_origin": "ast",
+      "community": 29,
+      "community_name": "tempfile",
+      "file_type": "code",
+      "norm_label": "dubmixingtests",
+      "source_file": "tests/test_dub_mixing.py",
+      "source_location": "L11"
+    },
+    {
+      "id": "tests_test_separator_separatortests",
+      "label": "SeparatorTests",
+      "_callable": true,
+      "_callable_class": true,
+      "_origin": "ast",
+      "community": 29,
+      "community_name": "tempfile",
+      "file_type": "code",
+      "norm_label": "separatortests",
+      "source_file": "tests/test_separator.py",
+      "source_location": "L12"
+    },
+    {
+      "id": "app_bot_contentjob",
+      "label": "ContentJob",
+      "_callable": true,
+      "_callable_class": true,
+      "_origin": "ast",
+      "community": 3,
+      "community_name": "worker",
+      "file_type": "code",
+      "norm_label": "contentjob",
+      "source_file": "app/bot.py",
+      "source_location": "L91"
+    },
+    {
+      "id": "app_bot_downloadjob",
+      "label": "DownloadJob",
+      "_callable": true,
+      "_callable_class": true,
+      "_origin": "ast",
+      "community": 3,
+      "community_name": "worker",
+      "file_type": "code",
+      "norm_label": "downloadjob",
+      "source_file": "app/bot.py",
+      "source_location": "L78"
     },
     {
       "id": "app_bot_job",
@@ -550,17 +498,69 @@
       "source_location": "L50"
     },
     {
-      "id": "app_image_generation_imagemodel",
-      "label": "ImageModel",
+      "id": "tests_test_downloads_downloaddeliverytests",
+      "label": "DownloadDeliveryTests",
       "_callable": true,
       "_callable_class": true,
       "_origin": "ast",
       "community": 3,
       "community_name": "worker",
       "file_type": "code",
-      "norm_label": "imagemodel",
-      "source_file": "app/image_generation.py",
+      "norm_label": "downloaddeliverytests",
+      "source_file": "tests/test_downloads.py",
+      "source_location": "L71"
+    },
+    {
+      "id": "tests_test_downloads_linktests",
+      "label": "LinkTests",
+      "_callable": true,
+      "_callable_class": true,
+      "_origin": "ast",
+      "community": 3,
+      "community_name": "worker",
+      "file_type": "code",
+      "norm_label": "linktests",
+      "source_file": "tests/test_downloads.py",
       "source_location": "L13"
+    },
+    {
+      "id": "tests_test_video_captions_transcriptiontests",
+      "label": "TranscriptionTests",
+      "_callable": true,
+      "_callable_class": true,
+      "_origin": "ast",
+      "community": 30,
+      "community_name": "TranscriptionTests",
+      "file_type": "code",
+      "norm_label": "transcriptiontests",
+      "source_file": "tests/test_video_captions.py",
+      "source_location": "L44"
+    },
+    {
+      "id": "tests_test_order_history_orderhistorytests",
+      "label": "OrderHistoryTests",
+      "_callable": true,
+      "_callable_class": true,
+      "_origin": "ast",
+      "community": 31,
+      "community_name": "OrderHistoryTests",
+      "file_type": "code",
+      "norm_label": "orderhistorytests",
+      "source_file": "tests/test_order_history.py",
+      "source_location": "L39"
+    },
+    {
+      "id": "tests_test_ui_inputflowtests",
+      "label": "InputFlowTests",
+      "_callable": true,
+      "_callable_class": true,
+      "_origin": "ast",
+      "community": 32,
+      "community_name": "InputFlowTests",
+      "file_type": "code",
+      "norm_label": "inputflowtests",
+      "source_file": "tests/test_ui.py",
+      "source_location": "L18"
     },
     {
       "id": "app_pipeline_jobcancelled",
@@ -587,19 +587,6 @@
       "norm_label": "contenttests",
       "source_file": "tests/test_content.py",
       "source_location": "L10"
-    },
-    {
-      "id": "tests_test_downloads_linktests",
-      "label": "LinkTests",
-      "_callable": true,
-      "_callable_class": true,
-      "_origin": "ast",
-      "community": 4,
-      "community_name": "downloads.py",
-      "file_type": "code",
-      "norm_label": "linktests",
-      "source_file": "tests/test_downloads.py",
-      "source_location": "L13"
     },
     {
       "id": "tests_test_subtitles_subtitletests",
@@ -784,6 +771,19 @@
       "source_location": "L8"
     },
     {
+      "id": "app_image_generation_imagemodel",
+      "label": "ImageModel",
+      "_callable": true,
+      "_callable_class": true,
+      "_origin": "ast",
+      "community": 8,
+      "community_name": "app/pipeline.py",
+      "file_type": "code",
+      "norm_label": "imagemodel",
+      "source_file": "app/image_generation.py",
+      "source_location": "L13"
+    },
+    {
       "id": "app_pipeline_openaicost",
       "label": "OpenAICost",
       "_callable": true,
@@ -916,18 +916,6 @@
       "norm_label": "cancel_order_callback()",
       "source_file": "app/bot.py",
       "source_location": "L655"
-    },
-    {
-      "id": "app_bot_cancel_requested_text",
-      "label": "_cancel_requested_text()",
-      "_callable": true,
-      "_origin": "ast",
-      "community": 0,
-      "community_name": "bot.py",
-      "file_type": "code",
-      "norm_label": "_cancel_requested_text()",
-      "source_file": "app/bot.py",
-      "source_location": "L741"
     },
     {
       "id": "app_bot_charge_wallet",
@@ -1386,18 +1374,6 @@
       "source_location": "L2471"
     },
     {
-      "id": "app_bot_safe_edit",
-      "label": "_safe_edit()",
-      "_callable": true,
-      "_origin": "ast",
-      "community": 0,
-      "community_name": "bot.py",
-      "file_type": "code",
-      "norm_label": "_safe_edit()",
-      "source_file": "app/bot.py",
-      "source_location": "L2961"
-    },
-    {
       "id": "app_bot_save_admin_value",
       "label": "_save_admin_value()",
       "_callable": true,
@@ -1794,28 +1770,16 @@
       "source_location": "L88"
     },
     {
-      "id": "app_bot_botstate_init",
-      "label": ".__init__()",
+      "id": "app_bot_safe_edit",
+      "label": "_safe_edit()",
       "_callable": true,
       "_origin": "ast",
       "community": 1,
       "community_name": "BotState",
       "file_type": "code",
-      "norm_label": ".__init__()",
+      "norm_label": "_safe_edit()",
       "source_file": "app/bot.py",
-      "source_location": "L138"
-    },
-    {
-      "id": "app_bot_run_image_job",
-      "label": "_run_image_job()",
-      "_callable": true,
-      "_origin": "ast",
-      "community": 1,
-      "community_name": "BotState",
-      "file_type": "code",
-      "norm_label": "_run_image_job()",
-      "source_file": "app/bot.py",
-      "source_location": "L2313"
+      "source_location": "L2961"
     },
     {
       "id": "tests_test_commercial_ui_commercialuitests_test_disabled_content_never_charges",
@@ -1938,30 +1902,6 @@
       "source_location": "L12"
     },
     {
-      "id": "tests_test_downloads_downloaddeliverytests_test_audio_delivery_and_queue_cleanup",
-      "label": ".test_audio_delivery_and_queue_cleanup()",
-      "_callable": true,
-      "_origin": "ast",
-      "community": 1,
-      "community_name": "BotState",
-      "file_type": "code",
-      "norm_label": ".test_audio_delivery_and_queue_cleanup()",
-      "source_file": "tests/test_downloads.py",
-      "source_location": "L72"
-    },
-    {
-      "id": "tests_test_downloads_downloaddeliverytests_test_audio_delivery_and_queue_cleanup_fake_download",
-      "label": "fake_download()",
-      "_callable": true,
-      "_origin": "ast",
-      "community": 1,
-      "community_name": "BotState",
-      "file_type": "code",
-      "norm_label": "fake_download()",
-      "source_file": "tests/test_downloads.py",
-      "source_location": "L82"
-    },
-    {
       "id": "tests_test_downloads_downloadordertests_test_download_queues_once_without_wallet_charge",
       "label": ".test_download_queues_once_without_wallet_charge()",
       "_callable": true,
@@ -1986,30 +1926,6 @@
       "source_location": "L80"
     },
     {
-      "id": "tests_test_image_generation_imageflowtests_test_delivery_failure_keeps_completed_image_without_refund",
-      "label": ".test_delivery_failure_keeps_completed_image_without_refund()",
-      "_callable": true,
-      "_origin": "ast",
-      "community": 1,
-      "community_name": "BotState",
-      "file_type": "code",
-      "norm_label": ".test_delivery_failure_keeps_completed_image_without_refund()",
-      "source_file": "tests/test_image_generation.py",
-      "source_location": "L65"
-    },
-    {
-      "id": "tests_test_image_generation_imageflowtests_test_failed_generation_refunds",
-      "label": ".test_failed_generation_refunds()",
-      "_callable": true,
-      "_origin": "ast",
-      "community": 1,
-      "community_name": "BotState",
-      "file_type": "code",
-      "norm_label": ".test_failed_generation_refunds()",
-      "source_file": "tests/test_image_generation.py",
-      "source_location": "L51"
-    },
-    {
       "id": "tests_test_image_generation_imageflowtests_test_photo_caption_creates_edit_quote_at_edit_price",
       "label": ".test_photo_caption_creates_edit_quote_at_edit_price()",
       "_callable": true,
@@ -2020,54 +1936,6 @@
       "norm_label": ".test_photo_caption_creates_edit_quote_at_edit_price()",
       "source_file": "tests/test_image_generation.py",
       "source_location": "L90"
-    },
-    {
-      "id": "tests_test_model_settings_costdisplaytests_test_dub_prices_distinguish_generated_audio_and_unknown_openai_rate",
-      "label": ".test_dub_prices_distinguish_generated_audio_and_unknown_openai_rate()",
-      "_callable": true,
-      "_origin": "ast",
-      "community": 1,
-      "community_name": "BotState",
-      "file_type": "code",
-      "norm_label": ".test_dub_prices_distinguish_generated_audio_and_unknown_openai_rate()",
-      "source_file": "tests/test_model_settings.py",
-      "source_location": "L84"
-    },
-    {
-      "id": "tests_test_order_history_orderhistorytests_context",
-      "label": ".context()",
-      "_callable": true,
-      "_origin": "ast",
-      "community": 1,
-      "community_name": "BotState",
-      "file_type": "code",
-      "norm_label": ".context()",
-      "source_file": "tests/test_order_history.py",
-      "source_location": "L40"
-    },
-    {
-      "id": "tests_test_order_history_orderhistorytests_test_detail_is_scoped_to_current_user",
-      "label": ".test_detail_is_scoped_to_current_user()",
-      "_callable": true,
-      "_origin": "ast",
-      "community": 1,
-      "community_name": "BotState",
-      "file_type": "code",
-      "norm_label": ".test_detail_is_scoped_to_current_user()",
-      "source_file": "tests/test_order_history.py",
-      "source_location": "L46"
-    },
-    {
-      "id": "tests_test_order_history_orderhistorytests_test_pages_have_next_and_no_other_users",
-      "label": ".test_pages_have_next_and_no_other_users()",
-      "_callable": true,
-      "_origin": "ast",
-      "community": 1,
-      "community_name": "BotState",
-      "file_type": "code",
-      "norm_label": ".test_pages_have_next_and_no_other_users()",
-      "source_file": "tests/test_order_history.py",
-      "source_location": "L55"
     },
     {
       "id": "tests_test_orders_ordertests_test_price_is_shown_before_single_charge",
@@ -2092,126 +1960,6 @@
       "norm_label": ".test_smart_unavailable_never_charges()",
       "source_file": "tests/test_orders.py",
       "source_location": "L11"
-    },
-    {
-      "id": "tests_test_separator_separatortests_test_separation_writes_complete_background",
-      "label": ".test_separation_writes_complete_background()",
-      "_callable": true,
-      "_origin": "ast",
-      "community": 1,
-      "community_name": "BotState",
-      "file_type": "code",
-      "norm_label": ".test_separation_writes_complete_background()",
-      "source_file": "tests/test_separator.py",
-      "source_location": "L13"
-    },
-    {
-      "id": "tests_test_separator_separatortests_test_separation_writes_complete_background_run",
-      "label": "run()",
-      "_callable": true,
-      "_origin": "ast",
-      "community": 1,
-      "community_name": "BotState",
-      "file_type": "code",
-      "norm_label": "run()",
-      "source_file": "tests/test_separator.py",
-      "source_location": "L22"
-    },
-    {
-      "id": "tests_test_ui_inputflowtests_make_context",
-      "label": ".make_context()",
-      "_callable": true,
-      "_origin": "ast",
-      "community": 1,
-      "community_name": "BotState",
-      "file_type": "code",
-      "norm_label": ".make_context()",
-      "source_file": "tests/test_ui.py",
-      "source_location": "L19"
-    },
-    {
-      "id": "tests_test_ui_inputflowtests_test_support_message_is_sent_once_and_exits_input_mode",
-      "label": ".test_support_message_is_sent_once_and_exits_input_mode()",
-      "_callable": true,
-      "_origin": "ast",
-      "community": 1,
-      "community_name": "BotState",
-      "file_type": "code",
-      "norm_label": ".test_support_message_is_sent_once_and_exits_input_mode()",
-      "source_file": "tests/test_ui.py",
-      "source_location": "L42"
-    },
-    {
-      "id": "tests_test_ui_inputflowtests_test_topup_accepts_amount_without_command",
-      "label": ".test_topup_accepts_amount_without_command()",
-      "_callable": true,
-      "_origin": "ast",
-      "community": 1,
-      "community_name": "BotState",
-      "file_type": "code",
-      "norm_label": ".test_topup_accepts_amount_without_command()",
-      "source_file": "tests/test_ui.py",
-      "source_location": "L32"
-    },
-    {
-      "id": "tests_test_ui_keyboardtests_test_home_and_order_buttons_have_telegram_styles",
-      "label": ".test_home_and_order_buttons_have_telegram_styles()",
-      "_callable": true,
-      "_origin": "ast",
-      "community": 1,
-      "community_name": "BotState",
-      "file_type": "code",
-      "norm_label": ".test_home_and_order_buttons_have_telegram_styles()",
-      "source_file": "tests/test_ui.py",
-      "source_location": "L10"
-    },
-    {
-      "id": "features_video_captions_ass_builder_escape",
-      "label": "_escape()",
-      "_callable": true,
-      "_origin": "ast",
-      "community": 10,
-      "community_name": "handlers.py",
-      "file_type": "code",
-      "norm_label": "_escape()",
-      "source_file": "features/video_captions/ass_builder.py",
-      "source_location": "L16"
-    },
-    {
-      "id": "features_video_captions_ass_builder_groups",
-      "label": "_groups()",
-      "_callable": true,
-      "_origin": "ast",
-      "community": 10,
-      "community_name": "handlers.py",
-      "file_type": "code",
-      "norm_label": "_groups()",
-      "source_file": "features/video_captions/ass_builder.py",
-      "source_location": "L20"
-    },
-    {
-      "id": "features_video_captions_ass_builder_time",
-      "label": "_time()",
-      "_callable": true,
-      "_origin": "ast",
-      "community": 10,
-      "community_name": "handlers.py",
-      "file_type": "code",
-      "norm_label": "_time()",
-      "source_file": "features/video_captions/ass_builder.py",
-      "source_location": "L8"
-    },
-    {
-      "id": "features_video_captions_ass_builder_write_ass",
-      "label": "write_ass()",
-      "_callable": true,
-      "_origin": "ast",
-      "community": 10,
-      "community_name": "handlers.py",
-      "file_type": "code",
-      "norm_label": "write_ass()",
-      "source_file": "features/video_captions/ass_builder.py",
-      "source_location": "L34"
     },
     {
       "id": "features_video_captions_grading_grader_close",
@@ -2356,222 +2104,6 @@
       "norm_label": "render()",
       "source_file": "features/video_captions/pipeline.py",
       "source_location": "L39"
-    },
-    {
-      "id": "features_video_captions_transcribe_model",
-      "label": "_model()",
-      "_callable": true,
-      "_origin": "ast",
-      "community": 10,
-      "community_name": "handlers.py",
-      "file_type": "code",
-      "norm_label": "_model()",
-      "source_file": "features/video_captions/transcribe.py",
-      "source_location": "L19"
-    },
-    {
-      "id": "features_video_captions_transcribe_transcribe",
-      "label": "transcribe()",
-      "_callable": true,
-      "_origin": "ast",
-      "community": 10,
-      "community_name": "handlers.py",
-      "file_type": "code",
-      "norm_label": "transcribe()",
-      "source_file": "features/video_captions/transcribe.py",
-      "source_location": "L25"
-    },
-    {
-      "id": "tests_test_video_captions_captionbuildertests_test_group_limits_and_ass_control_characters",
-      "label": ".test_group_limits_and_ass_control_characters()",
-      "_callable": true,
-      "_origin": "ast",
-      "community": 10,
-      "community_name": "handlers.py",
-      "file_type": "code",
-      "norm_label": ".test_group_limits_and_ass_control_characters()",
-      "source_file": "tests/test_video_captions.py",
-      "source_location": "L31"
-    },
-    {
-      "id": "tests_test_video_captions_captionbuildertests_test_word_highlighting_and_rtl_logical_order",
-      "label": ".test_word_highlighting_and_rtl_logical_order()",
-      "_callable": true,
-      "_origin": "ast",
-      "community": 10,
-      "community_name": "handlers.py",
-      "file_type": "code",
-      "norm_label": ".test_word_highlighting_and_rtl_logical_order()",
-      "source_file": "tests/test_video_captions.py",
-      "source_location": "L17"
-    },
-    {
-      "id": "tests_test_video_captions_probetests_test_raw_frame_render_preserves_audio",
-      "label": ".test_raw_frame_render_preserves_audio()",
-      "_callable": true,
-      "_origin": "ast",
-      "community": 10,
-      "community_name": "handlers.py",
-      "file_type": "code",
-      "norm_label": ".test_raw_frame_render_preserves_audio()",
-      "source_file": "tests/test_video_captions.py",
-      "source_location": "L79"
-    },
-    {
-      "id": "tests_test_video_captions_probetests_test_raw_frame_render_preserves_audio_close",
-      "label": "close()",
-      "_callable": true,
-      "_origin": "ast",
-      "community": 10,
-      "community_name": "handlers.py",
-      "file_type": "code",
-      "norm_label": "close()",
-      "source_file": "tests/test_video_captions.py",
-      "source_location": "L101"
-    },
-    {
-      "id": "tests_test_video_captions_probetests_test_raw_frame_render_preserves_audio_frame",
-      "label": "frame()",
-      "_callable": true,
-      "_origin": "ast",
-      "community": 10,
-      "community_name": "handlers.py",
-      "file_type": "code",
-      "norm_label": "frame()",
-      "source_file": "tests/test_video_captions.py",
-      "source_location": "L99"
-    },
-    {
-      "id": "tests_test_video_captions_probetests_test_raw_frame_render_preserves_audio_get",
-      "label": "get()",
-      "_callable": true,
-      "_origin": "ast",
-      "community": 10,
-      "community_name": "handlers.py",
-      "file_type": "code",
-      "norm_label": "get()",
-      "source_file": "tests/test_video_captions.py",
-      "source_location": "L89"
-    },
-    {
-      "id": "tests_test_video_captions_probetests_test_raw_frame_render_preserves_audio_init",
-      "label": "__init__()",
-      "_callable": true,
-      "_origin": "ast",
-      "community": 10,
-      "community_name": "handlers.py",
-      "file_type": "code",
-      "norm_label": "__init__()",
-      "source_file": "tests/test_video_captions.py",
-      "source_location": "L85"
-    },
-    {
-      "id": "tests_test_video_captions_probetests_test_raw_frame_render_preserves_audio_isopened",
-      "label": "isOpened()",
-      "_callable": true,
-      "_origin": "ast",
-      "community": 10,
-      "community_name": "handlers.py",
-      "file_type": "code",
-      "norm_label": "isopened()",
-      "source_file": "tests/test_video_captions.py",
-      "source_location": "L87"
-    },
-    {
-      "id": "tests_test_video_captions_probetests_test_raw_frame_render_preserves_audio_read",
-      "label": "read()",
-      "_callable": true,
-      "_origin": "ast",
-      "community": 10,
-      "community_name": "handlers.py",
-      "file_type": "code",
-      "norm_label": "read()",
-      "source_file": "tests/test_video_captions.py",
-      "source_location": "L91"
-    },
-    {
-      "id": "tests_test_video_captions_probetests_test_raw_frame_render_preserves_audio_release",
-      "label": "release()",
-      "_callable": true,
-      "_origin": "ast",
-      "community": 10,
-      "community_name": "handlers.py",
-      "file_type": "code",
-      "norm_label": "release()",
-      "source_file": "tests/test_video_captions.py",
-      "source_location": "L94"
-    },
-    {
-      "id": "tests_test_video_captions_probetests_test_raw_frame_render_preserves_audio_tobytes",
-      "label": "tobytes()",
-      "_callable": true,
-      "_origin": "ast",
-      "community": 10,
-      "community_name": "handlers.py",
-      "file_type": "code",
-      "norm_label": "tobytes()",
-      "source_file": "tests/test_video_captions.py",
-      "source_location": "L82"
-    },
-    {
-      "id": "tests_test_video_captions_probetests_test_uploaded_video_dimensions_duration_and_silent_audio",
-      "label": ".test_uploaded_video_dimensions_duration_and_silent_audio()",
-      "_callable": true,
-      "_origin": "ast",
-      "community": 10,
-      "community_name": "handlers.py",
-      "file_type": "code",
-      "norm_label": ".test_uploaded_video_dimensions_duration_and_silent_audio()",
-      "source_file": "tests/test_video_captions.py",
-      "source_location": "L67"
-    },
-    {
-      "id": "tests_test_video_captions_transcriptiontests_teardown",
-      "label": ".tearDown()",
-      "_callable": true,
-      "_origin": "ast",
-      "community": 10,
-      "community_name": "handlers.py",
-      "file_type": "code",
-      "norm_label": ".teardown()",
-      "source_file": "tests/test_video_captions.py",
-      "source_location": "L42"
-    },
-    {
-      "id": "tests_test_video_captions_transcriptiontests_test_singleton_vad_and_word_timestamps",
-      "label": ".test_singleton_vad_and_word_timestamps()",
-      "_callable": true,
-      "_origin": "ast",
-      "community": 10,
-      "community_name": "handlers.py",
-      "file_type": "code",
-      "norm_label": ".test_singleton_vad_and_word_timestamps()",
-      "source_file": "tests/test_video_captions.py",
-      "source_location": "L45"
-    },
-    {
-      "id": "tests_test_video_captions_transcriptiontests_test_singleton_vad_and_word_timestamps_init",
-      "label": "__init__()",
-      "_callable": true,
-      "_origin": "ast",
-      "community": 10,
-      "community_name": "handlers.py",
-      "file_type": "code",
-      "norm_label": "__init__()",
-      "source_file": "tests/test_video_captions.py",
-      "source_location": "L48"
-    },
-    {
-      "id": "tests_test_video_captions_transcriptiontests_test_singleton_vad_and_word_timestamps_transcribe",
-      "label": "transcribe()",
-      "_callable": true,
-      "_origin": "ast",
-      "community": 10,
-      "community_name": "handlers.py",
-      "file_type": "code",
-      "norm_label": "transcribe()",
-      "source_file": "tests/test_video_captions.py",
-      "source_location": "L50"
     },
     {
       "id": "app_database_database_direct_wallet_adjustment",
@@ -2910,102 +2442,6 @@
       "source_location": "L99"
     },
     {
-      "id": "tests_test_image_generation_imageapitests_test_openai_edit_uses_edit_endpoint",
-      "label": ".test_openai_edit_uses_edit_endpoint()",
-      "_callable": true,
-      "_origin": "ast",
-      "community": 17,
-      "community_name": "model_catalog.py",
-      "file_type": "code",
-      "norm_label": ".test_openai_edit_uses_edit_endpoint()",
-      "source_file": "tests/test_image_generation.py",
-      "source_location": "L26"
-    },
-    {
-      "id": "tests_test_image_generation_imageapitests_test_openrouter_edit_sends_reference_and_records_cost",
-      "label": ".test_openrouter_edit_sends_reference_and_records_cost()",
-      "_callable": true,
-      "_origin": "ast",
-      "community": 17,
-      "community_name": "model_catalog.py",
-      "file_type": "code",
-      "norm_label": ".test_openrouter_edit_sends_reference_and_records_cost()",
-      "source_file": "tests/test_image_generation.py",
-      "source_location": "L14"
-    },
-    {
-      "id": "tests_test_image_generation_imageapitests_test_optimizer_receives_reference_and_preserves_original",
-      "label": ".test_optimizer_receives_reference_and_preserves_original()",
-      "_callable": true,
-      "_origin": "ast",
-      "community": 17,
-      "community_name": "model_catalog.py",
-      "file_type": "code",
-      "norm_label": ".test_optimizer_receives_reference_and_preserves_original()",
-      "source_file": "tests/test_image_generation.py",
-      "source_location": "L36"
-    },
-    {
-      "id": "tests_test_model_settings_memorydb_get_setting",
-      "label": ".get_setting()",
-      "_callable": true,
-      "_origin": "ast",
-      "community": 17,
-      "community_name": "model_catalog.py",
-      "file_type": "code",
-      "norm_label": ".get_setting()",
-      "source_file": "tests/test_model_settings.py",
-      "source_location": "L23"
-    },
-    {
-      "id": "tests_test_model_settings_memorydb_init",
-      "label": ".__init__()",
-      "_callable": true,
-      "_origin": "ast",
-      "community": 17,
-      "community_name": "model_catalog.py",
-      "file_type": "code",
-      "norm_label": ".__init__()",
-      "source_file": "tests/test_model_settings.py",
-      "source_location": "L22"
-    },
-    {
-      "id": "tests_test_model_settings_memorydb_set_setting",
-      "label": ".set_setting()",
-      "_callable": true,
-      "_origin": "ast",
-      "community": 17,
-      "community_name": "model_catalog.py",
-      "file_type": "code",
-      "norm_label": ".set_setting()",
-      "source_file": "tests/test_model_settings.py",
-      "source_location": "L24"
-    },
-    {
-      "id": "tests_test_model_settings_minuteestimatetests_test_scenario_prices",
-      "label": ".test_scenario_prices()",
-      "_callable": true,
-      "_origin": "ast",
-      "community": 17,
-      "community_name": "model_catalog.py",
-      "file_type": "code",
-      "norm_label": ".test_scenario_prices()",
-      "source_file": "tests/test_model_settings.py",
-      "source_location": "L115"
-    },
-    {
-      "id": "tests_test_model_settings_minuteestimatetests_test_summary_has_each_stage_and_both_totals",
-      "label": ".test_summary_has_each_stage_and_both_totals()",
-      "_callable": true,
-      "_origin": "ast",
-      "community": 17,
-      "community_name": "model_catalog.py",
-      "file_type": "code",
-      "norm_label": ".test_summary_has_each_stage_and_both_totals()",
-      "source_file": "tests/test_model_settings.py",
-      "source_location": "L90"
-    },
-    {
       "id": "tests_test_model_settings_minuteestimatetests_test_unknown_price_never_yields_fabricated_total",
       "label": ".test_unknown_price_never_yields_fabricated_total()",
       "_callable": true,
@@ -3016,66 +2452,6 @@
       "norm_label": ".test_unknown_price_never_yields_fabricated_total()",
       "source_file": "tests/test_model_settings.py",
       "source_location": "L108"
-    },
-    {
-      "id": "tests_test_model_settings_modelsettingstests_test_admin_selection_and_access_control",
-      "label": ".test_admin_selection_and_access_control()",
-      "_callable": true,
-      "_origin": "ast",
-      "community": 17,
-      "community_name": "model_catalog.py",
-      "file_type": "code",
-      "norm_label": ".test_admin_selection_and_access_control()",
-      "source_file": "tests/test_model_settings.py",
-      "source_location": "L43"
-    },
-    {
-      "id": "tests_test_model_settings_modelsettingstests_test_independent_choices_persist_and_snapshot",
-      "label": ".test_independent_choices_persist_and_snapshot()",
-      "_callable": true,
-      "_origin": "ast",
-      "community": 17,
-      "community_name": "model_catalog.py",
-      "file_type": "code",
-      "norm_label": ".test_independent_choices_persist_and_snapshot()",
-      "source_file": "tests/test_model_settings.py",
-      "source_location": "L28"
-    },
-    {
-      "id": "tests_test_model_settings_modelsettingstests_test_mixed_providers_route_to_correct_clients",
-      "label": ".test_mixed_providers_route_to_correct_clients()",
-      "_callable": true,
-      "_origin": "ast",
-      "community": 17,
-      "community_name": "model_catalog.py",
-      "file_type": "code",
-      "norm_label": ".test_mixed_providers_route_to_correct_clients()",
-      "source_file": "tests/test_model_settings.py",
-      "source_location": "L56"
-    },
-    {
-      "id": "tests_test_model_settings_modelsettingstests_test_mixed_providers_route_to_correct_clients_run",
-      "label": "run()",
-      "_callable": true,
-      "_origin": "ast",
-      "community": 17,
-      "community_name": "model_catalog.py",
-      "file_type": "code",
-      "norm_label": "run()",
-      "source_file": "tests/test_model_settings.py",
-      "source_location": "L66"
-    },
-    {
-      "id": "tests_test_model_settings_settings",
-      "label": "settings()",
-      "_callable": true,
-      "_origin": "ast",
-      "community": 17,
-      "community_name": "model_catalog.py",
-      "file_type": "code",
-      "norm_label": "settings()",
-      "source_file": "tests/test_model_settings.py",
-      "source_location": "L13"
     },
     {
       "id": "tests_test_subtitles_subtitletests_test_full_subtitle_pipeline_outputs_matching_bounded_cues",
@@ -3150,16 +2526,40 @@
       "source_location": "L527"
     },
     {
-      "id": "app_database_database_purchase_minutes",
-      "label": ".purchase_minutes()",
+      "id": "app_database_database_create_job",
+      "label": ".create_job()",
       "_callable": true,
       "_origin": "ast",
       "community": 18,
       "community_name": "WalletTransaction",
       "file_type": "code",
-      "norm_label": ".purchase_minutes()",
+      "norm_label": ".create_job()",
       "source_file": "app/database.py",
-      "source_location": "L605"
+      "source_location": "L341"
+    },
+    {
+      "id": "app_database_database_create_package_job",
+      "label": ".create_package_job()",
+      "_callable": true,
+      "_origin": "ast",
+      "community": 18,
+      "community_name": "WalletTransaction",
+      "file_type": "code",
+      "norm_label": ".create_package_job()",
+      "source_file": "app/database.py",
+      "source_location": "L627"
+    },
+    {
+      "id": "app_database_database_create_wallet_job",
+      "label": ".create_wallet_job()",
+      "_callable": true,
+      "_origin": "ast",
+      "community": 18,
+      "community_name": "WalletTransaction",
+      "file_type": "code",
+      "norm_label": ".create_wallet_job()",
+      "source_file": "app/database.py",
+      "source_location": "L962"
     },
     {
       "id": "app_database_database_refund_content_order",
@@ -3198,40 +2598,16 @@
       "source_location": "L987"
     },
     {
-      "id": "app_database_database_create_job",
-      "label": ".create_job()",
+      "id": "app_database_database_purchase_minutes",
+      "label": ".purchase_minutes()",
       "_callable": true,
       "_origin": "ast",
       "community": 19,
       "community_name": "test_database_integration.py",
       "file_type": "code",
-      "norm_label": ".create_job()",
+      "norm_label": ".purchase_minutes()",
       "source_file": "app/database.py",
-      "source_location": "L341"
-    },
-    {
-      "id": "app_database_database_create_package_job",
-      "label": ".create_package_job()",
-      "_callable": true,
-      "_origin": "ast",
-      "community": 19,
-      "community_name": "test_database_integration.py",
-      "file_type": "code",
-      "norm_label": ".create_package_job()",
-      "source_file": "app/database.py",
-      "source_location": "L627"
-    },
-    {
-      "id": "app_database_database_create_wallet_job",
-      "label": ".create_wallet_job()",
-      "_callable": true,
-      "_origin": "ast",
-      "community": 19,
-      "community_name": "test_database_integration.py",
-      "file_type": "code",
-      "norm_label": ".create_wallet_job()",
-      "source_file": "app/database.py",
-      "source_location": "L962"
+      "source_location": "L605"
     },
     {
       "id": "app_database_database_accept_terms",
@@ -3750,6 +3126,54 @@
       "source_location": "L745"
     },
     {
+      "id": "tests_test_model_settings_costdisplaytests_test_dub_prices_distinguish_generated_audio_and_unknown_openai_rate",
+      "label": ".test_dub_prices_distinguish_generated_audio_and_unknown_openai_rate()",
+      "_callable": true,
+      "_origin": "ast",
+      "community": 22,
+      "community_name": "test_model_settings.py",
+      "file_type": "code",
+      "norm_label": ".test_dub_prices_distinguish_generated_audio_and_unknown_openai_rate()",
+      "source_file": "tests/test_model_settings.py",
+      "source_location": "L84"
+    },
+    {
+      "id": "tests_test_ui_keyboardtests_test_home_and_order_buttons_have_telegram_styles",
+      "label": ".test_home_and_order_buttons_have_telegram_styles()",
+      "_callable": true,
+      "_origin": "ast",
+      "community": 22,
+      "community_name": "test_model_settings.py",
+      "file_type": "code",
+      "norm_label": ".test_home_and_order_buttons_have_telegram_styles()",
+      "source_file": "tests/test_ui.py",
+      "source_location": "L10"
+    },
+    {
+      "id": "features_video_captions_transcribe_model",
+      "label": "_model()",
+      "_callable": true,
+      "_origin": "ast",
+      "community": 23,
+      "community_name": "test_video_captions.py",
+      "file_type": "code",
+      "norm_label": "_model()",
+      "source_file": "features/video_captions/transcribe.py",
+      "source_location": "L19"
+    },
+    {
+      "id": "features_video_captions_transcribe_transcribe",
+      "label": "transcribe()",
+      "_callable": true,
+      "_origin": "ast",
+      "community": 23,
+      "community_name": "test_video_captions.py",
+      "file_type": "code",
+      "norm_label": "transcribe()",
+      "source_file": "features/video_captions/transcribe.py",
+      "source_location": "L25"
+    },
+    {
       "id": "app_bot_order_active_link",
       "label": "_order_active_link()",
       "_callable": true,
@@ -3784,6 +3208,438 @@
       "norm_label": ".test_link_expiry_status_and_file_presence()",
       "source_file": "tests/test_order_history.py",
       "source_location": "L12"
+    },
+    {
+      "id": "tests_test_model_settings_memorydb_get_setting",
+      "label": ".get_setting()",
+      "_callable": true,
+      "_origin": "ast",
+      "community": 25,
+      "community_name": "MemoryDB",
+      "file_type": "code",
+      "norm_label": ".get_setting()",
+      "source_file": "tests/test_model_settings.py",
+      "source_location": "L23"
+    },
+    {
+      "id": "tests_test_model_settings_memorydb_init",
+      "label": ".__init__()",
+      "_callable": true,
+      "_origin": "ast",
+      "community": 25,
+      "community_name": "MemoryDB",
+      "file_type": "code",
+      "norm_label": ".__init__()",
+      "source_file": "tests/test_model_settings.py",
+      "source_location": "L22"
+    },
+    {
+      "id": "tests_test_model_settings_memorydb_set_setting",
+      "label": ".set_setting()",
+      "_callable": true,
+      "_origin": "ast",
+      "community": 25,
+      "community_name": "MemoryDB",
+      "file_type": "code",
+      "norm_label": ".set_setting()",
+      "source_file": "tests/test_model_settings.py",
+      "source_location": "L24"
+    },
+    {
+      "id": "tests_test_model_settings_minuteestimatetests_test_scenario_prices",
+      "label": ".test_scenario_prices()",
+      "_callable": true,
+      "_origin": "ast",
+      "community": 25,
+      "community_name": "MemoryDB",
+      "file_type": "code",
+      "norm_label": ".test_scenario_prices()",
+      "source_file": "tests/test_model_settings.py",
+      "source_location": "L115"
+    },
+    {
+      "id": "tests_test_model_settings_minuteestimatetests_test_summary_has_each_stage_and_both_totals",
+      "label": ".test_summary_has_each_stage_and_both_totals()",
+      "_callable": true,
+      "_origin": "ast",
+      "community": 25,
+      "community_name": "MemoryDB",
+      "file_type": "code",
+      "norm_label": ".test_summary_has_each_stage_and_both_totals()",
+      "source_file": "tests/test_model_settings.py",
+      "source_location": "L90"
+    },
+    {
+      "id": "tests_test_model_settings_modelsettingstests_test_admin_selection_and_access_control",
+      "label": ".test_admin_selection_and_access_control()",
+      "_callable": true,
+      "_origin": "ast",
+      "community": 25,
+      "community_name": "MemoryDB",
+      "file_type": "code",
+      "norm_label": ".test_admin_selection_and_access_control()",
+      "source_file": "tests/test_model_settings.py",
+      "source_location": "L43"
+    },
+    {
+      "id": "tests_test_model_settings_modelsettingstests_test_independent_choices_persist_and_snapshot",
+      "label": ".test_independent_choices_persist_and_snapshot()",
+      "_callable": true,
+      "_origin": "ast",
+      "community": 25,
+      "community_name": "MemoryDB",
+      "file_type": "code",
+      "norm_label": ".test_independent_choices_persist_and_snapshot()",
+      "source_file": "tests/test_model_settings.py",
+      "source_location": "L28"
+    },
+    {
+      "id": "tests_test_model_settings_modelsettingstests_test_mixed_providers_route_to_correct_clients",
+      "label": ".test_mixed_providers_route_to_correct_clients()",
+      "_callable": true,
+      "_origin": "ast",
+      "community": 25,
+      "community_name": "MemoryDB",
+      "file_type": "code",
+      "norm_label": ".test_mixed_providers_route_to_correct_clients()",
+      "source_file": "tests/test_model_settings.py",
+      "source_location": "L56"
+    },
+    {
+      "id": "tests_test_model_settings_modelsettingstests_test_mixed_providers_route_to_correct_clients_run",
+      "label": "run()",
+      "_callable": true,
+      "_origin": "ast",
+      "community": 25,
+      "community_name": "MemoryDB",
+      "file_type": "code",
+      "norm_label": "run()",
+      "source_file": "tests/test_model_settings.py",
+      "source_location": "L66"
+    },
+    {
+      "id": "tests_test_model_settings_settings",
+      "label": "settings()",
+      "_callable": true,
+      "_origin": "ast",
+      "community": 25,
+      "community_name": "MemoryDB",
+      "file_type": "code",
+      "norm_label": "settings()",
+      "source_file": "tests/test_model_settings.py",
+      "source_location": "L13"
+    },
+    {
+      "id": "tests_test_video_captions_probetests_test_raw_frame_render_preserves_audio",
+      "label": ".test_raw_frame_render_preserves_audio()",
+      "_callable": true,
+      "_origin": "ast",
+      "community": 26,
+      "community_name": ".test_raw_frame_render_preserves_audio",
+      "file_type": "code",
+      "norm_label": ".test_raw_frame_render_preserves_audio()",
+      "source_file": "tests/test_video_captions.py",
+      "source_location": "L95"
+    },
+    {
+      "id": "tests_test_video_captions_probetests_test_raw_frame_render_preserves_audio_close",
+      "label": "close()",
+      "_callable": true,
+      "_origin": "ast",
+      "community": 26,
+      "community_name": ".test_raw_frame_render_preserves_audio",
+      "file_type": "code",
+      "norm_label": "close()",
+      "source_file": "tests/test_video_captions.py",
+      "source_location": "L117"
+    },
+    {
+      "id": "tests_test_video_captions_probetests_test_raw_frame_render_preserves_audio_frame",
+      "label": "frame()",
+      "_callable": true,
+      "_origin": "ast",
+      "community": 26,
+      "community_name": ".test_raw_frame_render_preserves_audio",
+      "file_type": "code",
+      "norm_label": "frame()",
+      "source_file": "tests/test_video_captions.py",
+      "source_location": "L115"
+    },
+    {
+      "id": "tests_test_video_captions_probetests_test_raw_frame_render_preserves_audio_get",
+      "label": "get()",
+      "_callable": true,
+      "_origin": "ast",
+      "community": 26,
+      "community_name": ".test_raw_frame_render_preserves_audio",
+      "file_type": "code",
+      "norm_label": "get()",
+      "source_file": "tests/test_video_captions.py",
+      "source_location": "L105"
+    },
+    {
+      "id": "tests_test_video_captions_probetests_test_raw_frame_render_preserves_audio_init",
+      "label": "__init__()",
+      "_callable": true,
+      "_origin": "ast",
+      "community": 26,
+      "community_name": ".test_raw_frame_render_preserves_audio",
+      "file_type": "code",
+      "norm_label": "__init__()",
+      "source_file": "tests/test_video_captions.py",
+      "source_location": "L101"
+    },
+    {
+      "id": "tests_test_video_captions_probetests_test_raw_frame_render_preserves_audio_isopened",
+      "label": "isOpened()",
+      "_callable": true,
+      "_origin": "ast",
+      "community": 26,
+      "community_name": ".test_raw_frame_render_preserves_audio",
+      "file_type": "code",
+      "norm_label": "isopened()",
+      "source_file": "tests/test_video_captions.py",
+      "source_location": "L103"
+    },
+    {
+      "id": "tests_test_video_captions_probetests_test_raw_frame_render_preserves_audio_read",
+      "label": "read()",
+      "_callable": true,
+      "_origin": "ast",
+      "community": 26,
+      "community_name": ".test_raw_frame_render_preserves_audio",
+      "file_type": "code",
+      "norm_label": "read()",
+      "source_file": "tests/test_video_captions.py",
+      "source_location": "L107"
+    },
+    {
+      "id": "tests_test_video_captions_probetests_test_raw_frame_render_preserves_audio_release",
+      "label": "release()",
+      "_callable": true,
+      "_origin": "ast",
+      "community": 26,
+      "community_name": ".test_raw_frame_render_preserves_audio",
+      "file_type": "code",
+      "norm_label": "release()",
+      "source_file": "tests/test_video_captions.py",
+      "source_location": "L110"
+    },
+    {
+      "id": "tests_test_video_captions_probetests_test_raw_frame_render_preserves_audio_tobytes",
+      "label": "tobytes()",
+      "_callable": true,
+      "_origin": "ast",
+      "community": 26,
+      "community_name": ".test_raw_frame_render_preserves_audio",
+      "file_type": "code",
+      "norm_label": "tobytes()",
+      "source_file": "tests/test_video_captions.py",
+      "source_location": "L98"
+    },
+    {
+      "id": "tests_test_video_captions_probetests_test_uploaded_video_dimensions_duration_and_silent_audio",
+      "label": ".test_uploaded_video_dimensions_duration_and_silent_audio()",
+      "_callable": true,
+      "_origin": "ast",
+      "community": 26,
+      "community_name": ".test_raw_frame_render_preserves_audio",
+      "file_type": "code",
+      "norm_label": ".test_uploaded_video_dimensions_duration_and_silent_audio()",
+      "source_file": "tests/test_video_captions.py",
+      "source_location": "L83"
+    },
+    {
+      "id": "tests_test_video_captions_transcriptiontests_test_faster_whisper_decodes_real_wav",
+      "label": ".test_faster_whisper_decodes_real_wav()",
+      "_callable": true,
+      "_origin": "ast",
+      "community": 26,
+      "community_name": ".test_raw_frame_render_preserves_audio",
+      "file_type": "code",
+      "norm_label": ".test_faster_whisper_decodes_real_wav()",
+      "source_file": "tests/test_video_captions.py",
+      "source_location": "L69"
+    },
+    {
+      "id": "app_bot_run_image_job",
+      "label": "_run_image_job()",
+      "_callable": true,
+      "_origin": "ast",
+      "community": 27,
+      "community_name": "test_image_generation.py",
+      "file_type": "code",
+      "norm_label": "_run_image_job()",
+      "source_file": "app/bot.py",
+      "source_location": "L2313"
+    },
+    {
+      "id": "tests_test_image_generation_imageapitests_test_openai_edit_uses_edit_endpoint",
+      "label": ".test_openai_edit_uses_edit_endpoint()",
+      "_callable": true,
+      "_origin": "ast",
+      "community": 27,
+      "community_name": "test_image_generation.py",
+      "file_type": "code",
+      "norm_label": ".test_openai_edit_uses_edit_endpoint()",
+      "source_file": "tests/test_image_generation.py",
+      "source_location": "L26"
+    },
+    {
+      "id": "tests_test_image_generation_imageapitests_test_openrouter_edit_sends_reference_and_records_cost",
+      "label": ".test_openrouter_edit_sends_reference_and_records_cost()",
+      "_callable": true,
+      "_origin": "ast",
+      "community": 27,
+      "community_name": "test_image_generation.py",
+      "file_type": "code",
+      "norm_label": ".test_openrouter_edit_sends_reference_and_records_cost()",
+      "source_file": "tests/test_image_generation.py",
+      "source_location": "L14"
+    },
+    {
+      "id": "tests_test_image_generation_imageapitests_test_optimizer_receives_reference_and_preserves_original",
+      "label": ".test_optimizer_receives_reference_and_preserves_original()",
+      "_callable": true,
+      "_origin": "ast",
+      "community": 27,
+      "community_name": "test_image_generation.py",
+      "file_type": "code",
+      "norm_label": ".test_optimizer_receives_reference_and_preserves_original()",
+      "source_file": "tests/test_image_generation.py",
+      "source_location": "L36"
+    },
+    {
+      "id": "tests_test_image_generation_imageflowtests_test_delivery_failure_keeps_completed_image_without_refund",
+      "label": ".test_delivery_failure_keeps_completed_image_without_refund()",
+      "_callable": true,
+      "_origin": "ast",
+      "community": 27,
+      "community_name": "test_image_generation.py",
+      "file_type": "code",
+      "norm_label": ".test_delivery_failure_keeps_completed_image_without_refund()",
+      "source_file": "tests/test_image_generation.py",
+      "source_location": "L65"
+    },
+    {
+      "id": "tests_test_image_generation_imageflowtests_test_failed_generation_refunds",
+      "label": ".test_failed_generation_refunds()",
+      "_callable": true,
+      "_origin": "ast",
+      "community": 27,
+      "community_name": "test_image_generation.py",
+      "file_type": "code",
+      "norm_label": ".test_failed_generation_refunds()",
+      "source_file": "tests/test_image_generation.py",
+      "source_location": "L51"
+    },
+    {
+      "id": "features_video_captions_ass_builder_escape",
+      "label": "_escape()",
+      "_callable": true,
+      "_origin": "ast",
+      "community": 28,
+      "community_name": "write_ass",
+      "file_type": "code",
+      "norm_label": "_escape()",
+      "source_file": "features/video_captions/ass_builder.py",
+      "source_location": "L16"
+    },
+    {
+      "id": "features_video_captions_ass_builder_groups",
+      "label": "_groups()",
+      "_callable": true,
+      "_origin": "ast",
+      "community": 28,
+      "community_name": "write_ass",
+      "file_type": "code",
+      "norm_label": "_groups()",
+      "source_file": "features/video_captions/ass_builder.py",
+      "source_location": "L20"
+    },
+    {
+      "id": "features_video_captions_ass_builder_time",
+      "label": "_time()",
+      "_callable": true,
+      "_origin": "ast",
+      "community": 28,
+      "community_name": "write_ass",
+      "file_type": "code",
+      "norm_label": "_time()",
+      "source_file": "features/video_captions/ass_builder.py",
+      "source_location": "L8"
+    },
+    {
+      "id": "features_video_captions_ass_builder_write_ass",
+      "label": "write_ass()",
+      "_callable": true,
+      "_origin": "ast",
+      "community": 28,
+      "community_name": "write_ass",
+      "file_type": "code",
+      "norm_label": "write_ass()",
+      "source_file": "features/video_captions/ass_builder.py",
+      "source_location": "L34"
+    },
+    {
+      "id": "tests_test_video_captions_captionbuildertests_test_group_limits_and_ass_control_characters",
+      "label": ".test_group_limits_and_ass_control_characters()",
+      "_callable": true,
+      "_origin": "ast",
+      "community": 28,
+      "community_name": "write_ass",
+      "file_type": "code",
+      "norm_label": ".test_group_limits_and_ass_control_characters()",
+      "source_file": "tests/test_video_captions.py",
+      "source_location": "L34"
+    },
+    {
+      "id": "tests_test_video_captions_captionbuildertests_test_word_highlighting_and_rtl_logical_order",
+      "label": ".test_word_highlighting_and_rtl_logical_order()",
+      "_callable": true,
+      "_origin": "ast",
+      "community": 28,
+      "community_name": "write_ass",
+      "file_type": "code",
+      "norm_label": ".test_word_highlighting_and_rtl_logical_order()",
+      "source_file": "tests/test_video_captions.py",
+      "source_location": "L20"
+    },
+    {
+      "id": "tests_test_separator_separatortests_test_separation_writes_complete_background",
+      "label": ".test_separation_writes_complete_background()",
+      "_callable": true,
+      "_origin": "ast",
+      "community": 29,
+      "community_name": "tempfile",
+      "file_type": "code",
+      "norm_label": ".test_separation_writes_complete_background()",
+      "source_file": "tests/test_separator.py",
+      "source_location": "L13"
+    },
+    {
+      "id": "tests_test_separator_separatortests_test_separation_writes_complete_background_run",
+      "label": "run()",
+      "_callable": true,
+      "_origin": "ast",
+      "community": 29,
+      "community_name": "tempfile",
+      "file_type": "code",
+      "norm_label": "run()",
+      "source_file": "tests/test_separator.py",
+      "source_location": "L22"
+    },
+    {
+      "id": "app_bot_cancel_requested_text",
+      "label": "_cancel_requested_text()",
+      "_callable": true,
+      "_origin": "ast",
+      "community": 3,
+      "community_name": "worker",
+      "file_type": "code",
+      "norm_label": "_cancel_requested_text()",
+      "source_file": "app/bot.py",
+      "source_location": "L741"
     },
     {
       "id": "app_bot_finish_progress",
@@ -3990,52 +3846,64 @@
       "source_location": "L2637"
     },
     {
-      "id": "app_image_generation_generate_image",
-      "label": "generate_image()",
+      "id": "app_downloads_resolve_spotify_track",
+      "label": "resolve_spotify_track()",
       "_callable": true,
       "_origin": "ast",
       "community": 3,
       "community_name": "worker",
       "file_type": "code",
-      "norm_label": "generate_image()",
-      "source_file": "app/image_generation.py",
-      "source_location": "L86"
+      "norm_label": "resolve_spotify_track()",
+      "source_file": "app/downloads.py",
+      "source_location": "L101"
     },
     {
-      "id": "app_image_generation_image_type",
-      "label": "image_type()",
+      "id": "app_pipeline_cleanup",
+      "label": "cleanup()",
       "_callable": true,
       "_origin": "ast",
       "community": 3,
       "community_name": "worker",
       "file_type": "code",
-      "norm_label": "image_type()",
-      "source_file": "app/image_generation.py",
-      "source_location": "L76"
+      "norm_label": "cleanup()",
+      "source_file": "app/pipeline.py",
+      "source_location": "L1301"
     },
     {
-      "id": "app_image_generation_optimize_prompt",
-      "label": "optimize_prompt()",
+      "id": "app_pipeline_cleanup_expired_downloads",
+      "label": "cleanup_expired_downloads()",
       "_callable": true,
       "_origin": "ast",
       "community": 3,
       "community_name": "worker",
       "file_type": "code",
-      "norm_label": "optimize_prompt()",
-      "source_file": "app/image_generation.py",
-      "source_location": "L49"
+      "norm_label": "cleanup_expired_downloads()",
+      "source_file": "app/pipeline.py",
+      "source_location": "L1305"
     },
     {
-      "id": "app_image_generation_selected_model",
-      "label": "selected_model()",
+      "id": "app_pipeline_publish_download",
+      "label": "publish_download()",
       "_callable": true,
       "_origin": "ast",
       "community": 3,
       "community_name": "worker",
       "file_type": "code",
-      "norm_label": "selected_model()",
-      "source_file": "app/image_generation.py",
-      "source_location": "L45"
+      "norm_label": "publish_download()",
+      "source_file": "app/pipeline.py",
+      "source_location": "L1319"
+    },
+    {
+      "id": "app_pipeline_publish_subtitle_player",
+      "label": "publish_subtitle_player()",
+      "_callable": true,
+      "_origin": "ast",
+      "community": 3,
+      "community_name": "worker",
+      "file_type": "code",
+      "norm_label": "publish_subtitle_player()",
+      "source_file": "app/pipeline.py",
+      "source_location": "L1333"
     },
     {
       "id": "tests_test_commercial_ui_commercialuitests_test_package_refund_message_is_clear",
@@ -4048,6 +3916,186 @@
       "norm_label": ".test_package_refund_message_is_clear()",
       "source_file": "tests/test_commercial_ui.py",
       "source_location": "L38"
+    },
+    {
+      "id": "tests_test_downloads_downloaddeliverytests_test_audio_delivery_and_queue_cleanup",
+      "label": ".test_audio_delivery_and_queue_cleanup()",
+      "_callable": true,
+      "_origin": "ast",
+      "community": 3,
+      "community_name": "worker",
+      "file_type": "code",
+      "norm_label": ".test_audio_delivery_and_queue_cleanup()",
+      "source_file": "tests/test_downloads.py",
+      "source_location": "L72"
+    },
+    {
+      "id": "tests_test_downloads_downloaddeliverytests_test_audio_delivery_and_queue_cleanup_fake_download",
+      "label": "fake_download()",
+      "_callable": true,
+      "_origin": "ast",
+      "community": 3,
+      "community_name": "worker",
+      "file_type": "code",
+      "norm_label": "fake_download()",
+      "source_file": "tests/test_downloads.py",
+      "source_location": "L82"
+    },
+    {
+      "id": "tests_test_downloads_linktests_test_allowlist_and_spotify_scope",
+      "label": ".test_allowlist_and_spotify_scope()",
+      "_callable": true,
+      "_origin": "ast",
+      "community": 3,
+      "community_name": "worker",
+      "file_type": "code",
+      "norm_label": ".test_allowlist_and_spotify_scope()",
+      "source_file": "tests/test_downloads.py",
+      "source_location": "L14"
+    },
+    {
+      "id": "tests_test_downloads_linktests_test_publication_and_cleanup_allow_mp3",
+      "label": ".test_publication_and_cleanup_allow_mp3()",
+      "_callable": true,
+      "_origin": "ast",
+      "community": 3,
+      "community_name": "worker",
+      "file_type": "code",
+      "norm_label": ".test_publication_and_cleanup_allow_mp3()",
+      "source_file": "tests/test_downloads.py",
+      "source_location": "L33"
+    },
+    {
+      "id": "tests_test_downloads_linktests_test_spotify_match_uses_fixed_host_and_video_id",
+      "label": ".test_spotify_match_uses_fixed_host_and_video_id()",
+      "_callable": true,
+      "_origin": "ast",
+      "community": 3,
+      "community_name": "worker",
+      "file_type": "code",
+      "norm_label": ".test_spotify_match_uses_fixed_host_and_video_id()",
+      "source_file": "tests/test_downloads.py",
+      "source_location": "L23"
+    },
+    {
+      "id": "tests_test_video_captions_transcriptiontests_teardown",
+      "label": ".tearDown()",
+      "_callable": true,
+      "_origin": "ast",
+      "community": 30,
+      "community_name": "TranscriptionTests",
+      "file_type": "code",
+      "norm_label": ".teardown()",
+      "source_file": "tests/test_video_captions.py",
+      "source_location": "L45"
+    },
+    {
+      "id": "tests_test_video_captions_transcriptiontests_test_singleton_vad_and_word_timestamps",
+      "label": ".test_singleton_vad_and_word_timestamps()",
+      "_callable": true,
+      "_origin": "ast",
+      "community": 30,
+      "community_name": "TranscriptionTests",
+      "file_type": "code",
+      "norm_label": ".test_singleton_vad_and_word_timestamps()",
+      "source_file": "tests/test_video_captions.py",
+      "source_location": "L48"
+    },
+    {
+      "id": "tests_test_video_captions_transcriptiontests_test_singleton_vad_and_word_timestamps_init",
+      "label": "__init__()",
+      "_callable": true,
+      "_origin": "ast",
+      "community": 30,
+      "community_name": "TranscriptionTests",
+      "file_type": "code",
+      "norm_label": "__init__()",
+      "source_file": "tests/test_video_captions.py",
+      "source_location": "L51"
+    },
+    {
+      "id": "tests_test_video_captions_transcriptiontests_test_singleton_vad_and_word_timestamps_transcribe",
+      "label": "transcribe()",
+      "_callable": true,
+      "_origin": "ast",
+      "community": 30,
+      "community_name": "TranscriptionTests",
+      "file_type": "code",
+      "norm_label": "transcribe()",
+      "source_file": "tests/test_video_captions.py",
+      "source_location": "L53"
+    },
+    {
+      "id": "tests_test_order_history_orderhistorytests_context",
+      "label": ".context()",
+      "_callable": true,
+      "_origin": "ast",
+      "community": 31,
+      "community_name": "OrderHistoryTests",
+      "file_type": "code",
+      "norm_label": ".context()",
+      "source_file": "tests/test_order_history.py",
+      "source_location": "L40"
+    },
+    {
+      "id": "tests_test_order_history_orderhistorytests_test_detail_is_scoped_to_current_user",
+      "label": ".test_detail_is_scoped_to_current_user()",
+      "_callable": true,
+      "_origin": "ast",
+      "community": 31,
+      "community_name": "OrderHistoryTests",
+      "file_type": "code",
+      "norm_label": ".test_detail_is_scoped_to_current_user()",
+      "source_file": "tests/test_order_history.py",
+      "source_location": "L46"
+    },
+    {
+      "id": "tests_test_order_history_orderhistorytests_test_pages_have_next_and_no_other_users",
+      "label": ".test_pages_have_next_and_no_other_users()",
+      "_callable": true,
+      "_origin": "ast",
+      "community": 31,
+      "community_name": "OrderHistoryTests",
+      "file_type": "code",
+      "norm_label": ".test_pages_have_next_and_no_other_users()",
+      "source_file": "tests/test_order_history.py",
+      "source_location": "L55"
+    },
+    {
+      "id": "tests_test_ui_inputflowtests_make_context",
+      "label": ".make_context()",
+      "_callable": true,
+      "_origin": "ast",
+      "community": 32,
+      "community_name": "InputFlowTests",
+      "file_type": "code",
+      "norm_label": ".make_context()",
+      "source_file": "tests/test_ui.py",
+      "source_location": "L19"
+    },
+    {
+      "id": "tests_test_ui_inputflowtests_test_support_message_is_sent_once_and_exits_input_mode",
+      "label": ".test_support_message_is_sent_once_and_exits_input_mode()",
+      "_callable": true,
+      "_origin": "ast",
+      "community": 32,
+      "community_name": "InputFlowTests",
+      "file_type": "code",
+      "norm_label": ".test_support_message_is_sent_once_and_exits_input_mode()",
+      "source_file": "tests/test_ui.py",
+      "source_location": "L42"
+    },
+    {
+      "id": "tests_test_ui_inputflowtests_test_topup_accepts_amount_without_command",
+      "label": ".test_topup_accepts_amount_without_command()",
+      "_callable": true,
+      "_origin": "ast",
+      "community": 32,
+      "community_name": "InputFlowTests",
+      "file_type": "code",
+      "norm_label": ".test_topup_accepts_amount_without_command()",
+      "source_file": "tests/test_ui.py",
+      "source_location": "L32"
     },
     {
       "id": "app_content_edit_subtitle_line",
@@ -4386,18 +4434,6 @@
       "source_location": "L229"
     },
     {
-      "id": "app_downloads_resolve_spotify_track",
-      "label": "resolve_spotify_track()",
-      "_callable": true,
-      "_origin": "ast",
-      "community": 4,
-      "community_name": "downloads.py",
-      "file_type": "code",
-      "norm_label": "resolve_spotify_track()",
-      "source_file": "app/downloads.py",
-      "source_location": "L101"
-    },
-    {
       "id": "app_downloads_walk_story_media",
       "label": "_walk_story_media()",
       "_callable": true,
@@ -4408,18 +4444,6 @@
       "norm_label": "_walk_story_media()",
       "source_file": "app/downloads.py",
       "source_location": "L137"
-    },
-    {
-      "id": "app_pipeline_translation_cost",
-      "label": "_translation_cost()",
-      "_callable": true,
-      "_origin": "ast",
-      "community": 4,
-      "community_name": "downloads.py",
-      "file_type": "code",
-      "norm_label": "_translation_cost()",
-      "source_file": "app/pipeline.py",
-      "source_location": "L180"
     },
     {
       "id": "app_pipeline_validate_youtube_url",
@@ -4518,18 +4542,6 @@
       "source_location": "L21"
     },
     {
-      "id": "tests_test_downloads_linktests_test_allowlist_and_spotify_scope",
-      "label": ".test_allowlist_and_spotify_scope()",
-      "_callable": true,
-      "_origin": "ast",
-      "community": 4,
-      "community_name": "downloads.py",
-      "file_type": "code",
-      "norm_label": ".test_allowlist_and_spotify_scope()",
-      "source_file": "tests/test_downloads.py",
-      "source_location": "L14"
-    },
-    {
       "id": "tests_test_downloads_linktests_test_download_audio_and_separate_cookies",
       "label": ".test_download_audio_and_separate_cookies()",
       "_callable": true,
@@ -4552,30 +4564,6 @@
       "norm_label": "extract()",
       "source_file": "tests/test_downloads.py",
       "source_location": "L47"
-    },
-    {
-      "id": "tests_test_downloads_linktests_test_publication_and_cleanup_allow_mp3",
-      "label": ".test_publication_and_cleanup_allow_mp3()",
-      "_callable": true,
-      "_origin": "ast",
-      "community": 4,
-      "community_name": "downloads.py",
-      "file_type": "code",
-      "norm_label": ".test_publication_and_cleanup_allow_mp3()",
-      "source_file": "tests/test_downloads.py",
-      "source_location": "L33"
-    },
-    {
-      "id": "tests_test_downloads_linktests_test_spotify_match_uses_fixed_host_and_video_id",
-      "label": ".test_spotify_match_uses_fixed_host_and_video_id()",
-      "_callable": true,
-      "_origin": "ast",
-      "community": 4,
-      "community_name": "downloads.py",
-      "file_type": "code",
-      "norm_label": ".test_spotify_match_uses_fixed_host_and_video_id()",
-      "source_file": "tests/test_downloads.py",
-      "source_location": "L23"
     },
     {
       "id": "app_subtitles_caption_cues",
@@ -4962,6 +4950,18 @@
       "source_location": "L120"
     },
     {
+      "id": "app_bot_botstate_init",
+      "label": ".__init__()",
+      "_callable": true,
+      "_origin": "ast",
+      "community": 8,
+      "community_name": "app/pipeline.py",
+      "file_type": "code",
+      "norm_label": ".__init__()",
+      "source_file": "app/bot.py",
+      "source_location": "L138"
+    },
+    {
       "id": "app_config_load_settings",
       "label": "load_settings()",
       "_callable": true,
@@ -4972,6 +4972,54 @@
       "norm_label": "load_settings()",
       "source_file": "app/config.py",
       "source_location": "L55"
+    },
+    {
+      "id": "app_image_generation_generate_image",
+      "label": "generate_image()",
+      "_callable": true,
+      "_origin": "ast",
+      "community": 8,
+      "community_name": "app/pipeline.py",
+      "file_type": "code",
+      "norm_label": "generate_image()",
+      "source_file": "app/image_generation.py",
+      "source_location": "L86"
+    },
+    {
+      "id": "app_image_generation_image_type",
+      "label": "image_type()",
+      "_callable": true,
+      "_origin": "ast",
+      "community": 8,
+      "community_name": "app/pipeline.py",
+      "file_type": "code",
+      "norm_label": "image_type()",
+      "source_file": "app/image_generation.py",
+      "source_location": "L76"
+    },
+    {
+      "id": "app_image_generation_optimize_prompt",
+      "label": "optimize_prompt()",
+      "_callable": true,
+      "_origin": "ast",
+      "community": 8,
+      "community_name": "app/pipeline.py",
+      "file_type": "code",
+      "norm_label": "optimize_prompt()",
+      "source_file": "app/image_generation.py",
+      "source_location": "L49"
+    },
+    {
+      "id": "app_image_generation_selected_model",
+      "label": "selected_model()",
+      "_callable": true,
+      "_origin": "ast",
+      "community": 8,
+      "community_name": "app/pipeline.py",
+      "file_type": "code",
+      "norm_label": "selected_model()",
+      "source_file": "app/image_generation.py",
+      "source_location": "L45"
     },
     {
       "id": "app_pipeline_audio_chunk_offsets",
@@ -4996,30 +5044,6 @@
       "norm_label": "_check_cancel()",
       "source_file": "app/pipeline.py",
       "source_location": "L198"
-    },
-    {
-      "id": "app_pipeline_cleanup",
-      "label": "cleanup()",
-      "_callable": true,
-      "_origin": "ast",
-      "community": 8,
-      "community_name": "app/pipeline.py",
-      "file_type": "code",
-      "norm_label": "cleanup()",
-      "source_file": "app/pipeline.py",
-      "source_location": "L1301"
-    },
-    {
-      "id": "app_pipeline_cleanup_expired_downloads",
-      "label": "cleanup_expired_downloads()",
-      "_callable": true,
-      "_origin": "ast",
-      "community": 8,
-      "community_name": "app/pipeline.py",
-      "file_type": "code",
-      "norm_label": "cleanup_expired_downloads()",
-      "source_file": "app/pipeline.py",
-      "source_location": "L1305"
     },
     {
       "id": "app_pipeline_configure_realtime_speech",
@@ -5262,30 +5286,6 @@
       "source_location": "L1195"
     },
     {
-      "id": "app_pipeline_publish_download",
-      "label": "publish_download()",
-      "_callable": true,
-      "_origin": "ast",
-      "community": 8,
-      "community_name": "app/pipeline.py",
-      "file_type": "code",
-      "norm_label": "publish_download()",
-      "source_file": "app/pipeline.py",
-      "source_location": "L1319"
-    },
-    {
-      "id": "app_pipeline_publish_subtitle_player",
-      "label": "publish_subtitle_player()",
-      "_callable": true,
-      "_origin": "ast",
-      "community": 8,
-      "community_name": "app/pipeline.py",
-      "file_type": "code",
-      "norm_label": "publish_subtitle_player()",
-      "source_file": "app/pipeline.py",
-      "source_location": "L1333"
-    },
-    {
       "id": "app_pipeline_realtime_speech_cost",
       "label": "_realtime_speech_cost()",
       "_callable": true,
@@ -5416,6 +5416,18 @@
       "norm_label": "_translate()",
       "source_file": "app/pipeline.py",
       "source_location": "L420"
+    },
+    {
+      "id": "app_pipeline_translation_cost",
+      "label": "_translation_cost()",
+      "_callable": true,
+      "_origin": "ast",
+      "community": 8,
+      "community_name": "app/pipeline.py",
+      "file_type": "code",
+      "norm_label": "_translation_cost()",
+      "source_file": "app/pipeline.py",
+      "source_location": "L180"
     },
     {
       "id": "app_pipeline_vtt_time",
@@ -5779,182 +5791,6 @@
       "source_location": "L1"
     },
     {
-      "id": "app_init",
-      "label": "app/__init__.py",
-      "_origin": "ast",
-      "community": 1,
-      "community_name": "BotState",
-      "file_type": "code",
-      "norm_label": "app/__init__.py",
-      "source_file": "app/__init__.py",
-      "source_location": "L1"
-    },
-    {
-      "id": "tests_test_commercial_ui",
-      "label": "test_commercial_ui.py",
-      "_origin": "ast",
-      "community": 1,
-      "community_name": "BotState",
-      "file_type": "code",
-      "norm_label": "test_commercial_ui.py",
-      "source_file": "tests/test_commercial_ui.py",
-      "source_location": "L1"
-    },
-    {
-      "id": "tests_test_conversation_progress",
-      "label": "test_conversation_progress.py",
-      "_origin": "ast",
-      "community": 1,
-      "community_name": "BotState",
-      "file_type": "code",
-      "norm_label": "test_conversation_progress.py",
-      "source_file": "tests/test_conversation_progress.py",
-      "source_location": "L1"
-    },
-    {
-      "id": "tests_test_downloads",
-      "label": "test_downloads.py",
-      "_origin": "ast",
-      "community": 1,
-      "community_name": "BotState",
-      "file_type": "code",
-      "norm_label": "test_downloads.py",
-      "source_file": "tests/test_downloads.py",
-      "source_location": "L1"
-    },
-    {
-      "id": "tests_test_dub_mixing",
-      "label": "test_dub_mixing.py",
-      "_origin": "ast",
-      "community": 1,
-      "community_name": "BotState",
-      "file_type": "code",
-      "norm_label": "test_dub_mixing.py",
-      "source_file": "tests/test_dub_mixing.py",
-      "source_location": "L1"
-    },
-    {
-      "id": "tests_test_dub_mixing_py_skipunless",
-      "label": "skipUnless",
-      "_origin": "ast",
-      "community": 1,
-      "community_name": "BotState",
-      "file_type": "code",
-      "norm_label": "skipunless",
-      "source_file": "",
-      "source_location": ""
-    },
-    {
-      "id": "tests_test_image_generation",
-      "label": "test_image_generation.py",
-      "_origin": "ast",
-      "community": 1,
-      "community_name": "BotState",
-      "file_type": "code",
-      "norm_label": "test_image_generation.py",
-      "source_file": "tests/test_image_generation.py",
-      "source_location": "L1"
-    },
-    {
-      "id": "tests_test_model_settings",
-      "label": "test_model_settings.py",
-      "_origin": "ast",
-      "community": 1,
-      "community_name": "BotState",
-      "file_type": "code",
-      "norm_label": "test_model_settings.py",
-      "source_file": "tests/test_model_settings.py",
-      "source_location": "L1"
-    },
-    {
-      "id": "tests_test_order_history",
-      "label": "test_order_history.py",
-      "_origin": "ast",
-      "community": 1,
-      "community_name": "BotState",
-      "file_type": "code",
-      "norm_label": "test_order_history.py",
-      "source_file": "tests/test_order_history.py",
-      "source_location": "L1"
-    },
-    {
-      "id": "tests_test_orders",
-      "label": "test_orders.py",
-      "_origin": "ast",
-      "community": 1,
-      "community_name": "BotState",
-      "file_type": "code",
-      "norm_label": "test_orders.py",
-      "source_file": "tests/test_orders.py",
-      "source_location": "L1"
-    },
-    {
-      "id": "tests_test_separator",
-      "label": "test_separator.py",
-      "_origin": "ast",
-      "community": 1,
-      "community_name": "BotState",
-      "file_type": "code",
-      "norm_label": "test_separator.py",
-      "source_file": "tests/test_separator.py",
-      "source_location": "L1"
-    },
-    {
-      "id": "tests_test_separator_py_skipunless",
-      "label": "skipUnless",
-      "_origin": "ast",
-      "community": 1,
-      "community_name": "BotState",
-      "file_type": "code",
-      "norm_label": "skipunless",
-      "source_file": "",
-      "source_location": ""
-    },
-    {
-      "id": "tests_test_ui",
-      "label": "test_ui.py",
-      "_origin": "ast",
-      "community": 1,
-      "community_name": "BotState",
-      "file_type": "code",
-      "norm_label": "test_ui.py",
-      "source_file": "tests/test_ui.py",
-      "source_location": "L1"
-    },
-    {
-      "id": "app_init_rationale_1",
-      "label": "YouTube Persian subtitle Telegram bot.",
-      "_origin": "ast",
-      "community": 1,
-      "community_name": "BotState",
-      "file_type": "rationale",
-      "norm_label": "youtube persian subtitle telegram bot.",
-      "source_file": "app/__init__.py",
-      "source_location": "L1"
-    },
-    {
-      "id": "features_video_captions_ass_builder",
-      "label": "ass_builder.py",
-      "_origin": "ast",
-      "community": 10,
-      "community_name": "handlers.py",
-      "file_type": "code",
-      "norm_label": "ass_builder.py",
-      "source_file": "features/video_captions/ass_builder.py",
-      "source_location": "L1"
-    },
-    {
-      "id": "features_video_captions_ass_builder_py_path",
-      "label": "Path",
-      "_origin": "ast",
-      "community": 10,
-      "community_name": "handlers.py",
-      "file_type": "code",
-      "norm_label": "path",
-      "source_file": "",
-      "source_location": ""
-    },
-    {
       "id": "features_video_captions_grading",
       "label": "grading.py",
       "_origin": "ast",
@@ -5977,17 +5813,6 @@
       "source_location": "L1"
     },
     {
-      "id": "features_video_captions_pipeline",
-      "label": "video_captions/pipeline.py",
-      "_origin": "ast",
-      "community": 10,
-      "community_name": "handlers.py",
-      "file_type": "code",
-      "norm_label": "video_captions/pipeline.py",
-      "source_file": "features/video_captions/pipeline.py",
-      "source_location": "L1"
-    },
-    {
       "id": "features_video_captions_pipeline_py_path",
       "label": "Path",
       "_origin": "ast",
@@ -5997,61 +5822,6 @@
       "norm_label": "path",
       "source_file": "",
       "source_location": ""
-    },
-    {
-      "id": "features_video_captions_transcribe",
-      "label": "transcribe.py",
-      "_origin": "ast",
-      "community": 10,
-      "community_name": "handlers.py",
-      "file_type": "code",
-      "norm_label": "transcribe.py",
-      "source_file": "features/video_captions/transcribe.py",
-      "source_location": "L1"
-    },
-    {
-      "id": "features_video_captions_transcribe_py_path",
-      "label": "Path",
-      "_origin": "ast",
-      "community": 10,
-      "community_name": "handlers.py",
-      "file_type": "code",
-      "norm_label": "path",
-      "source_file": "",
-      "source_location": ""
-    },
-    {
-      "id": "tests_test_video_captions",
-      "label": "test_video_captions.py",
-      "_origin": "ast",
-      "community": 10,
-      "community_name": "handlers.py",
-      "file_type": "code",
-      "norm_label": "test_video_captions.py",
-      "source_file": "tests/test_video_captions.py",
-      "source_location": "L1"
-    },
-    {
-      "id": "tests_test_video_captions_py_skipunless",
-      "label": "skipUnless",
-      "_origin": "ast",
-      "community": 10,
-      "community_name": "handlers.py",
-      "file_type": "code",
-      "norm_label": "skipunless",
-      "source_file": "",
-      "source_location": ""
-    },
-    {
-      "id": "features_video_captions_ass_builder_rationale_1",
-      "label": "Generate timed ASS captions with per-word highlighting.",
-      "_origin": "ast",
-      "community": 10,
-      "community_name": "handlers.py",
-      "file_type": "rationale",
-      "norm_label": "generate timed ass captions with per-word highlighting.",
-      "source_file": "features/video_captions/ass_builder.py",
-      "source_location": "L1"
     },
     {
       "id": "features_video_captions_grading_rationale_1",
@@ -6073,28 +5843,6 @@
       "file_type": "rationale",
       "norm_label": "telegram workflow for offline caption and color jobs.",
       "source_file": "features/video_captions/handlers.py",
-      "source_location": "L1"
-    },
-    {
-      "id": "features_video_captions_pipeline_rationale_1",
-      "label": "Offline captions and one-pass video rendering for uploaded videos.",
-      "_origin": "ast",
-      "community": 10,
-      "community_name": "handlers.py",
-      "file_type": "rationale",
-      "norm_label": "offline captions and one-pass video rendering for uploaded videos.",
-      "source_file": "features/video_captions/pipeline.py",
-      "source_location": "L1"
-    },
-    {
-      "id": "features_video_captions_transcribe_rationale_1",
-      "label": "Local speech recognition with one lazily loaded CPU model per process.",
-      "_origin": "ast",
-      "community": 10,
-      "community_name": "handlers.py",
-      "file_type": "rationale",
-      "norm_label": "local speech recognition with one lazily loaded cpu model per process.",
-      "source_file": "features/video_captions/transcribe.py",
       "source_location": "L1"
     },
     {
@@ -6333,6 +6081,160 @@
       "source_location": ""
     },
     {
+      "id": "app_init",
+      "label": "app/__init__.py",
+      "_origin": "ast",
+      "community": 22,
+      "community_name": "test_model_settings.py",
+      "file_type": "code",
+      "norm_label": "app/__init__.py",
+      "source_file": "app/__init__.py",
+      "source_location": "L1"
+    },
+    {
+      "id": "tests_test_commercial_ui",
+      "label": "test_commercial_ui.py",
+      "_origin": "ast",
+      "community": 22,
+      "community_name": "test_model_settings.py",
+      "file_type": "code",
+      "norm_label": "test_commercial_ui.py",
+      "source_file": "tests/test_commercial_ui.py",
+      "source_location": "L1"
+    },
+    {
+      "id": "tests_test_conversation_progress",
+      "label": "test_conversation_progress.py",
+      "_origin": "ast",
+      "community": 22,
+      "community_name": "test_model_settings.py",
+      "file_type": "code",
+      "norm_label": "test_conversation_progress.py",
+      "source_file": "tests/test_conversation_progress.py",
+      "source_location": "L1"
+    },
+    {
+      "id": "tests_test_model_settings",
+      "label": "test_model_settings.py",
+      "_origin": "ast",
+      "community": 22,
+      "community_name": "test_model_settings.py",
+      "file_type": "code",
+      "norm_label": "test_model_settings.py",
+      "source_file": "tests/test_model_settings.py",
+      "source_location": "L1"
+    },
+    {
+      "id": "tests_test_order_history",
+      "label": "test_order_history.py",
+      "_origin": "ast",
+      "community": 22,
+      "community_name": "test_model_settings.py",
+      "file_type": "code",
+      "norm_label": "test_order_history.py",
+      "source_file": "tests/test_order_history.py",
+      "source_location": "L1"
+    },
+    {
+      "id": "tests_test_orders",
+      "label": "test_orders.py",
+      "_origin": "ast",
+      "community": 22,
+      "community_name": "test_model_settings.py",
+      "file_type": "code",
+      "norm_label": "test_orders.py",
+      "source_file": "tests/test_orders.py",
+      "source_location": "L1"
+    },
+    {
+      "id": "tests_test_ui",
+      "label": "test_ui.py",
+      "_origin": "ast",
+      "community": 22,
+      "community_name": "test_model_settings.py",
+      "file_type": "code",
+      "norm_label": "test_ui.py",
+      "source_file": "tests/test_ui.py",
+      "source_location": "L1"
+    },
+    {
+      "id": "app_init_rationale_1",
+      "label": "YouTube Persian subtitle Telegram bot.",
+      "_origin": "ast",
+      "community": 22,
+      "community_name": "test_model_settings.py",
+      "file_type": "rationale",
+      "norm_label": "youtube persian subtitle telegram bot.",
+      "source_file": "app/__init__.py",
+      "source_location": "L1"
+    },
+    {
+      "id": "features_video_captions_pipeline",
+      "label": "video_captions/pipeline.py",
+      "_origin": "ast",
+      "community": 23,
+      "community_name": "test_video_captions.py",
+      "file_type": "code",
+      "norm_label": "video_captions/pipeline.py",
+      "source_file": "features/video_captions/pipeline.py",
+      "source_location": "L1"
+    },
+    {
+      "id": "features_video_captions_transcribe",
+      "label": "transcribe.py",
+      "_origin": "ast",
+      "community": 23,
+      "community_name": "test_video_captions.py",
+      "file_type": "code",
+      "norm_label": "transcribe.py",
+      "source_file": "features/video_captions/transcribe.py",
+      "source_location": "L1"
+    },
+    {
+      "id": "features_video_captions_transcribe_py_path",
+      "label": "Path",
+      "_origin": "ast",
+      "community": 23,
+      "community_name": "test_video_captions.py",
+      "file_type": "code",
+      "norm_label": "path",
+      "source_file": "",
+      "source_location": ""
+    },
+    {
+      "id": "tests_test_video_captions",
+      "label": "test_video_captions.py",
+      "_origin": "ast",
+      "community": 23,
+      "community_name": "test_video_captions.py",
+      "file_type": "code",
+      "norm_label": "test_video_captions.py",
+      "source_file": "tests/test_video_captions.py",
+      "source_location": "L1"
+    },
+    {
+      "id": "features_video_captions_pipeline_rationale_1",
+      "label": "Offline captions and one-pass video rendering for uploaded videos.",
+      "_origin": "ast",
+      "community": 23,
+      "community_name": "test_video_captions.py",
+      "file_type": "rationale",
+      "norm_label": "offline captions and one-pass video rendering for uploaded videos.",
+      "source_file": "features/video_captions/pipeline.py",
+      "source_location": "L1"
+    },
+    {
+      "id": "features_video_captions_transcribe_rationale_1",
+      "label": "Local speech recognition with one lazily loaded CPU model per process.",
+      "_origin": "ast",
+      "community": 23,
+      "community_name": "test_video_captions.py",
+      "file_type": "rationale",
+      "norm_label": "local speech recognition with one lazily loaded cpu model per process.",
+      "source_file": "features/video_captions/transcribe.py",
+      "source_location": "L1"
+    },
+    {
       "id": "app_bot_py_datetime",
       "label": "datetime",
       "_origin": "ast",
@@ -6355,6 +6257,105 @@
       "source_location": "L1766"
     },
     {
+      "id": "tests_test_video_captions_py_skipunless",
+      "label": "skipUnless",
+      "_origin": "ast",
+      "community": 26,
+      "community_name": ".test_raw_frame_render_preserves_audio",
+      "file_type": "code",
+      "norm_label": "skipunless",
+      "source_file": "",
+      "source_location": ""
+    },
+    {
+      "id": "tests_test_image_generation",
+      "label": "test_image_generation.py",
+      "_origin": "ast",
+      "community": 27,
+      "community_name": "test_image_generation.py",
+      "file_type": "code",
+      "norm_label": "test_image_generation.py",
+      "source_file": "tests/test_image_generation.py",
+      "source_location": "L1"
+    },
+    {
+      "id": "features_video_captions_ass_builder",
+      "label": "ass_builder.py",
+      "_origin": "ast",
+      "community": 28,
+      "community_name": "write_ass",
+      "file_type": "code",
+      "norm_label": "ass_builder.py",
+      "source_file": "features/video_captions/ass_builder.py",
+      "source_location": "L1"
+    },
+    {
+      "id": "features_video_captions_ass_builder_py_path",
+      "label": "Path",
+      "_origin": "ast",
+      "community": 28,
+      "community_name": "write_ass",
+      "file_type": "code",
+      "norm_label": "path",
+      "source_file": "",
+      "source_location": ""
+    },
+    {
+      "id": "features_video_captions_ass_builder_rationale_1",
+      "label": "Generate timed ASS captions with per-word highlighting.",
+      "_origin": "ast",
+      "community": 28,
+      "community_name": "write_ass",
+      "file_type": "rationale",
+      "norm_label": "generate timed ass captions with per-word highlighting.",
+      "source_file": "features/video_captions/ass_builder.py",
+      "source_location": "L1"
+    },
+    {
+      "id": "tests_test_dub_mixing",
+      "label": "test_dub_mixing.py",
+      "_origin": "ast",
+      "community": 29,
+      "community_name": "tempfile",
+      "file_type": "code",
+      "norm_label": "test_dub_mixing.py",
+      "source_file": "tests/test_dub_mixing.py",
+      "source_location": "L1"
+    },
+    {
+      "id": "tests_test_dub_mixing_py_skipunless",
+      "label": "skipUnless",
+      "_origin": "ast",
+      "community": 29,
+      "community_name": "tempfile",
+      "file_type": "code",
+      "norm_label": "skipunless",
+      "source_file": "",
+      "source_location": ""
+    },
+    {
+      "id": "tests_test_separator",
+      "label": "test_separator.py",
+      "_origin": "ast",
+      "community": 29,
+      "community_name": "tempfile",
+      "file_type": "code",
+      "norm_label": "test_separator.py",
+      "source_file": "tests/test_separator.py",
+      "source_location": "L1"
+    },
+    {
+      "id": "tests_test_separator_py_skipunless",
+      "label": "skipUnless",
+      "_origin": "ast",
+      "community": 29,
+      "community_name": "tempfile",
+      "file_type": "code",
+      "norm_label": "skipunless",
+      "source_file": "",
+      "source_location": ""
+    },
+    {
       "id": "app_bot_py_path",
       "label": "Path",
       "_origin": "ast",
@@ -6364,17 +6365,6 @@
       "norm_label": "path",
       "source_file": "",
       "source_location": ""
-    },
-    {
-      "id": "app_image_generation",
-      "label": "image_generation.py",
-      "_origin": "ast",
-      "community": 3,
-      "community_name": "worker",
-      "file_type": "code",
-      "norm_label": "image_generation.py",
-      "source_file": "app/image_generation.py",
-      "source_location": "L1"
     },
     {
       "id": "application",
@@ -6399,15 +6389,37 @@
       "source_location": ""
     },
     {
-      "id": "app_image_generation_rationale_1",
-      "label": "Image generation and intent-preserving prompt preparation.",
+      "id": "tests_test_downloads",
+      "label": "test_downloads.py",
+      "_origin": "ast",
+      "community": 3,
+      "community_name": "worker",
+      "file_type": "code",
+      "norm_label": "test_downloads.py",
+      "source_file": "tests/test_downloads.py",
+      "source_location": "L1"
+    },
+    {
+      "id": "app_downloads_rationale_102",
+      "label": "Resolve one Spotify track to a labelled public YouTube search result.",
       "_origin": "ast",
       "community": 3,
       "community_name": "worker",
       "file_type": "rationale",
-      "norm_label": "image generation and intent-preserving prompt preparation.",
-      "source_file": "app/image_generation.py",
-      "source_location": "L1"
+      "norm_label": "resolve one spotify track to a labelled public youtube search result.",
+      "source_file": "app/downloads.py",
+      "source_location": "L102"
+    },
+    {
+      "id": "app_pipeline_rationale_1336",
+      "label": "Publish a no-transcode video bundle and a lightweight browser player.",
+      "_origin": "ast",
+      "community": 3,
+      "community_name": "worker",
+      "file_type": "rationale",
+      "norm_label": "publish a no-transcode video bundle and a lightweight browser player.",
+      "source_file": "app/pipeline.py",
+      "source_location": "L1336"
     },
     {
       "id": "app_content",
@@ -6485,17 +6497,6 @@
       "norm_label": "download-only flows for supported social media links.",
       "source_file": "app/downloads.py",
       "source_location": "L1"
-    },
-    {
-      "id": "app_downloads_rationale_102",
-      "label": "Resolve one Spotify track to a labelled public YouTube search result.",
-      "_origin": "ast",
-      "community": 4,
-      "community_name": "downloads.py",
-      "file_type": "rationale",
-      "norm_label": "resolve one spotify track to a labelled public youtube search result.",
-      "source_file": "app/downloads.py",
-      "source_location": "L102"
     },
     {
       "id": "app_downloads_rationale_138",
@@ -6696,6 +6697,17 @@
       "source_location": "L1"
     },
     {
+      "id": "app_image_generation",
+      "label": "image_generation.py",
+      "_origin": "ast",
+      "community": 8,
+      "community_name": "app/pipeline.py",
+      "file_type": "code",
+      "norm_label": "image_generation.py",
+      "source_file": "app/image_generation.py",
+      "source_location": "L1"
+    },
+    {
       "id": "app_pipeline",
       "label": "app/pipeline.py",
       "_origin": "ast",
@@ -6784,6 +6796,17 @@
       "source_location": "L1"
     },
     {
+      "id": "app_image_generation_rationale_1",
+      "label": "Image generation and intent-preserving prompt preparation.",
+      "_origin": "ast",
+      "community": 8,
+      "community_name": "app/pipeline.py",
+      "file_type": "rationale",
+      "norm_label": "image generation and intent-preserving prompt preparation.",
+      "source_file": "app/image_generation.py",
+      "source_location": "L1"
+    },
+    {
       "id": "app_pipeline_rationale_1119",
       "label": "Use the actual segment muxer boundaries, not nominal 8-minute offsets.",
       "_origin": "ast",
@@ -6793,17 +6816,6 @@
       "norm_label": "use the actual segment muxer boundaries, not nominal 8-minute offsets.",
       "source_file": "app/pipeline.py",
       "source_location": "L1119"
-    },
-    {
-      "id": "app_pipeline_rationale_1336",
-      "label": "Publish a no-transcode video bundle and a lightweight browser player.",
-      "_origin": "ast",
-      "community": 8,
-      "community_name": "app/pipeline.py",
-      "file_type": "rationale",
-      "norm_label": "publish a no-transcode video bundle and a lightweight browser player.",
-      "source_file": "app/pipeline.py",
-      "source_location": "L1336"
     },
     {
       "id": "app_pipeline_rationale_204",
@@ -6882,7 +6894,7 @@
       "node_kind": "heading",
       "norm_label": "https \u062f\u0627\u062e\u0644 docker \u0648 \u0627\u0646\u062a\u0642\u0627\u0644 \u0627\u0632 nginx \u0645\u06cc\u0632\u0628\u0627\u0646",
       "source_file": "README.md",
-      "source_location": "L264"
+      "source_location": "L266"
     },
     {
       "id": "readme_\u0627\u062c\u0631\u0627_\u0628\u0627_docker",
@@ -6918,7 +6930,7 @@
       "node_kind": "heading",
       "norm_label": "\u0627\u0645\u06a9\u0627\u0646\u0627\u062a \u0645\u062d\u062a\u0648\u0627\u06cc\u06cc\u060c \u0628\u0633\u062a\u0647\u200c\u0647\u0627\u06cc \u062f\u0642\u06cc\u0642\u0647 \u0648 \u062a\u06cc\u0645",
       "source_file": "README.md",
-      "source_location": "L321"
+      "source_location": "L323"
     },
     {
       "id": "readme_\u062a\u0646\u0638\u06cc\u0645\u0627\u062a",
@@ -6942,7 +6954,7 @@
       "node_kind": "heading",
       "norm_label": "\u062f\u0631\u06cc\u0627\u0641\u062a \u0627\u0632 \u0634\u0628\u06a9\u0647\u200c\u0647\u0627\u06cc \u0627\u062c\u062a\u0645\u0627\u0639\u06cc",
       "source_file": "README.md",
-      "source_location": "L239"
+      "source_location": "L241"
     },
     {
       "id": "readme_\u0631\u0628\u0627\u062a_\u062a\u062c\u0627\u0631\u06cc_\u062a\u0644\u06af\u0631\u0627\u0645_\u0628\u0631\u0627\u06cc_\u0632\u06cc\u0631\u0646\u0648\u06cc\u0633_\u0648_\u062f\u0648\u0628\u0644\u0647_\u0641\u0627\u0631\u0633\u06cc_\u06cc\u0648\u062a\u06cc\u0648\u0628",
@@ -7041,18 +7053,6 @@
       "source_location": "L5"
     },
     {
-      "id": "io",
-      "label": "io",
-      "_origin": "semantic",
-      "community": 0,
-      "community_name": "bot.py",
-      "external": true,
-      "file_type": "concept",
-      "norm_label": "io",
-      "source_file": "",
-      "type": "external"
-    },
-    {
       "id": "telegram_constants",
       "label": "telegram_constants",
       "_origin": "semantic",
@@ -7061,102 +7061,6 @@
       "external": true,
       "file_type": "concept",
       "norm_label": "telegram_constants",
-      "source_file": "",
-      "type": "external"
-    },
-    {
-      "id": "asyncio",
-      "label": "asyncio",
-      "_origin": "semantic",
-      "community": 1,
-      "community_name": "BotState",
-      "external": true,
-      "file_type": "concept",
-      "norm_label": "asyncio",
-      "source_file": "",
-      "type": "external"
-    },
-    {
-      "id": "pathlib",
-      "label": "pathlib",
-      "_origin": "semantic",
-      "community": 1,
-      "community_name": "BotState",
-      "external": true,
-      "file_type": "concept",
-      "norm_label": "pathlib",
-      "source_file": "",
-      "type": "external"
-    },
-    {
-      "id": "shutil",
-      "label": "shutil",
-      "_origin": "semantic",
-      "community": 1,
-      "community_name": "BotState",
-      "external": true,
-      "file_type": "concept",
-      "norm_label": "shutil",
-      "source_file": "",
-      "type": "external"
-    },
-    {
-      "id": "telegram_error",
-      "label": "telegram_error",
-      "_origin": "semantic",
-      "community": 1,
-      "community_name": "BotState",
-      "external": true,
-      "file_type": "concept",
-      "norm_label": "telegram_error",
-      "source_file": "",
-      "type": "external"
-    },
-    {
-      "id": "tempfile",
-      "label": "tempfile",
-      "_origin": "semantic",
-      "community": 1,
-      "community_name": "BotState",
-      "external": true,
-      "file_type": "concept",
-      "norm_label": "tempfile",
-      "source_file": "",
-      "type": "external"
-    },
-    {
-      "id": "types",
-      "label": "types",
-      "_origin": "semantic",
-      "community": 1,
-      "community_name": "BotState",
-      "external": true,
-      "file_type": "concept",
-      "norm_label": "types",
-      "source_file": "",
-      "type": "external"
-    },
-    {
-      "id": "unittest",
-      "label": "unittest",
-      "_origin": "semantic",
-      "community": 1,
-      "community_name": "BotState",
-      "external": true,
-      "file_type": "concept",
-      "norm_label": "unittest",
-      "source_file": "",
-      "type": "external"
-    },
-    {
-      "id": "unittest_mock",
-      "label": "unittest_mock",
-      "_origin": "semantic",
-      "community": 1,
-      "community_name": "BotState",
-      "external": true,
-      "file_type": "concept",
-      "norm_label": "unittest_mock",
       "source_file": "",
       "type": "external"
     },
@@ -7173,42 +7077,6 @@
       "type": "external"
     },
     {
-      "id": "functools",
-      "label": "functools",
-      "_origin": "semantic",
-      "community": 10,
-      "community_name": "handlers.py",
-      "external": true,
-      "file_type": "concept",
-      "norm_label": "functools",
-      "source_file": "",
-      "type": "external"
-    },
-    {
-      "id": "subprocess",
-      "label": "subprocess",
-      "_origin": "semantic",
-      "community": 10,
-      "community_name": "handlers.py",
-      "external": true,
-      "file_type": "concept",
-      "norm_label": "subprocess",
-      "source_file": "",
-      "type": "external"
-    },
-    {
-      "id": "sys",
-      "label": "sys",
-      "_origin": "semantic",
-      "community": 10,
-      "community_name": "handlers.py",
-      "external": true,
-      "file_type": "concept",
-      "norm_label": "sys",
-      "source_file": "",
-      "type": "external"
-    },
-    {
       "id": "telegram_ext",
       "label": "telegram_ext",
       "_origin": "semantic",
@@ -7217,18 +7085,6 @@
       "external": true,
       "file_type": "concept",
       "norm_label": "telegram_ext",
-      "source_file": "",
-      "type": "external"
-    },
-    {
-      "id": "threading",
-      "label": "threading",
-      "_origin": "semantic",
-      "community": 10,
-      "community_name": "handlers.py",
-      "external": true,
-      "file_type": "concept",
-      "norm_label": "threading",
       "source_file": "",
       "type": "external"
     },
@@ -7269,6 +7125,18 @@
       "type": "external"
     },
     {
+      "id": "os",
+      "label": "os",
+      "_origin": "semantic",
+      "community": 19,
+      "community_name": "test_database_integration.py",
+      "external": true,
+      "file_type": "concept",
+      "norm_label": "os",
+      "source_file": "",
+      "type": "external"
+    },
+    {
       "id": "uuid",
       "label": "uuid",
       "_origin": "semantic",
@@ -7281,26 +7149,146 @@
       "type": "external"
     },
     {
-      "id": "base64",
-      "label": "base64",
+      "id": "telegram_error",
+      "label": "telegram_error",
       "_origin": "semantic",
-      "community": 3,
-      "community_name": "worker",
+      "community": 22,
+      "community_name": "test_model_settings.py",
       "external": true,
       "file_type": "concept",
-      "norm_label": "base64",
+      "norm_label": "telegram_error",
       "source_file": "",
       "type": "external"
     },
     {
-      "id": "binascii",
-      "label": "binascii",
+      "id": "types",
+      "label": "types",
       "_origin": "semantic",
-      "community": 3,
-      "community_name": "worker",
+      "community": 22,
+      "community_name": "test_model_settings.py",
       "external": true,
       "file_type": "concept",
-      "norm_label": "binascii",
+      "norm_label": "types",
+      "source_file": "",
+      "type": "external"
+    },
+    {
+      "id": "unittest",
+      "label": "unittest",
+      "_origin": "semantic",
+      "community": 22,
+      "community_name": "test_model_settings.py",
+      "external": true,
+      "file_type": "concept",
+      "norm_label": "unittest",
+      "source_file": "",
+      "type": "external"
+    },
+    {
+      "id": "unittest_mock",
+      "label": "unittest_mock",
+      "_origin": "semantic",
+      "community": 22,
+      "community_name": "test_model_settings.py",
+      "external": true,
+      "file_type": "concept",
+      "norm_label": "unittest_mock",
+      "source_file": "",
+      "type": "external"
+    },
+    {
+      "id": "functools",
+      "label": "functools",
+      "_origin": "semantic",
+      "community": 23,
+      "community_name": "test_video_captions.py",
+      "external": true,
+      "file_type": "concept",
+      "norm_label": "functools",
+      "source_file": "",
+      "type": "external"
+    },
+    {
+      "id": "io",
+      "label": "io",
+      "_origin": "semantic",
+      "community": 23,
+      "community_name": "test_video_captions.py",
+      "external": true,
+      "file_type": "concept",
+      "norm_label": "io",
+      "source_file": "",
+      "type": "external"
+    },
+    {
+      "id": "pathlib",
+      "label": "pathlib",
+      "_origin": "semantic",
+      "community": 23,
+      "community_name": "test_video_captions.py",
+      "external": true,
+      "file_type": "concept",
+      "norm_label": "pathlib",
+      "source_file": "",
+      "type": "external"
+    },
+    {
+      "id": "sys",
+      "label": "sys",
+      "_origin": "semantic",
+      "community": 23,
+      "community_name": "test_video_captions.py",
+      "external": true,
+      "file_type": "concept",
+      "norm_label": "sys",
+      "source_file": "",
+      "type": "external"
+    },
+    {
+      "id": "threading",
+      "label": "threading",
+      "_origin": "semantic",
+      "community": 23,
+      "community_name": "test_video_captions.py",
+      "external": true,
+      "file_type": "concept",
+      "norm_label": "threading",
+      "source_file": "",
+      "type": "external"
+    },
+    {
+      "id": "shutil",
+      "label": "shutil",
+      "_origin": "semantic",
+      "community": 29,
+      "community_name": "tempfile",
+      "external": true,
+      "file_type": "concept",
+      "norm_label": "shutil",
+      "source_file": "",
+      "type": "external"
+    },
+    {
+      "id": "subprocess",
+      "label": "subprocess",
+      "_origin": "semantic",
+      "community": 29,
+      "community_name": "tempfile",
+      "external": true,
+      "file_type": "concept",
+      "norm_label": "subprocess",
+      "source_file": "",
+      "type": "external"
+    },
+    {
+      "id": "tempfile",
+      "label": "tempfile",
+      "_origin": "semantic",
+      "community": 29,
+      "community_name": "tempfile",
+      "external": true,
+      "file_type": "concept",
+      "norm_label": "tempfile",
       "source_file": "",
       "type": "external"
     },
@@ -7449,6 +7437,42 @@
       "type": "external"
     },
     {
+      "id": "asyncio",
+      "label": "asyncio",
+      "_origin": "semantic",
+      "community": 8,
+      "community_name": "app/pipeline.py",
+      "external": true,
+      "file_type": "concept",
+      "norm_label": "asyncio",
+      "source_file": "",
+      "type": "external"
+    },
+    {
+      "id": "base64",
+      "label": "base64",
+      "_origin": "semantic",
+      "community": 8,
+      "community_name": "app/pipeline.py",
+      "external": true,
+      "file_type": "concept",
+      "norm_label": "base64",
+      "source_file": "",
+      "type": "external"
+    },
+    {
+      "id": "binascii",
+      "label": "binascii",
+      "_origin": "semantic",
+      "community": 8,
+      "community_name": "app/pipeline.py",
+      "external": true,
+      "file_type": "concept",
+      "norm_label": "binascii",
+      "source_file": "",
+      "type": "external"
+    },
+    {
       "id": "collections",
       "label": "collections",
       "_origin": "semantic",
@@ -7509,18 +7533,6 @@
       "type": "external"
     },
     {
-      "id": "os",
-      "label": "os",
-      "_origin": "semantic",
-      "community": 8,
-      "community_name": "app/pipeline.py",
-      "external": true,
-      "file_type": "concept",
-      "norm_label": "os",
-      "source_file": "",
-      "type": "external"
-    },
-    {
       "id": "pydub",
       "label": "pydub",
       "_origin": "semantic",
@@ -7577,6 +7589,28 @@
       "external": true,
       "file_type": "concept",
       "norm_label": "websockets_sync_client",
+      "source_file": "",
+      "type": "external"
+    },
+    {
+      "id": "importlib_util",
+      "label": "importlib_util",
+      "community": 23,
+      "community_name": "test_video_captions.py",
+      "external": true,
+      "file_type": "concept",
+      "norm_label": "importlib_util",
+      "source_file": "",
+      "type": "external"
+    },
+    {
+      "id": "wave",
+      "label": "wave",
+      "community": 23,
+      "community_name": "test_video_captions.py",
+      "external": true,
+      "file_type": "concept",
+      "norm_label": "wave",
       "source_file": "",
       "type": "external"
     }
@@ -14431,7 +14465,7 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "tests/test_video_captions.py",
-      "source_location": "L32",
+      "source_location": "L35",
       "weight": 1.0
     },
     {
@@ -14443,7 +14477,7 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "tests/test_video_captions.py",
-      "source_location": "L33",
+      "source_location": "L36",
       "weight": 1.0
     },
     {
@@ -14455,7 +14489,7 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "tests/test_video_captions.py",
-      "source_location": "L36",
+      "source_location": "L39",
       "weight": 1.0
     },
     {
@@ -14467,7 +14501,7 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "tests/test_video_captions.py",
-      "source_location": "L18",
+      "source_location": "L21",
       "weight": 1.0
     },
     {
@@ -14479,7 +14513,7 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "tests/test_video_captions.py",
-      "source_location": "L21",
+      "source_location": "L24",
       "weight": 1.0
     },
     {
@@ -14491,7 +14525,7 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "tests/test_video_captions.py",
-      "source_location": "L110",
+      "source_location": "L126",
       "weight": 1.0
     },
     {
@@ -14503,7 +14537,7 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "tests/test_video_captions.py",
-      "source_location": "L111",
+      "source_location": "L127",
       "weight": 1.0
     },
     {
@@ -14515,7 +14549,7 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "tests/test_video_captions.py",
-      "source_location": "L73",
+      "source_location": "L89",
       "weight": 1.0
     },
     {
@@ -14527,7 +14561,7 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "tests/test_video_captions.py",
-      "source_location": "L58",
+      "source_location": "L61",
       "weight": 1.0
     },
     {
@@ -14647,7 +14681,7 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "tests/test_video_captions.py",
-      "source_location": "L50",
+      "source_location": "L53",
       "weight": 1.0
     },
     {
@@ -14695,7 +14729,7 @@
       "confidence_score": 1.0,
       "context": "decorator",
       "source_file": "tests/test_video_captions.py",
-      "source_location": "L78",
+      "source_location": "L94",
       "weight": 1.0
     },
     {
@@ -14707,7 +14741,19 @@
       "confidence_score": 1.0,
       "context": "decorator",
       "source_file": "tests/test_video_captions.py",
-      "source_location": "L66",
+      "source_location": "L82",
+      "weight": 1.0
+    },
+    {
+      "source": "tests_test_video_captions_transcriptiontests_test_faster_whisper_decodes_real_wav",
+      "target": "tests_test_video_captions_py_skipunless",
+      "relation": "references",
+      "_origin": "ast",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "context": "decorator",
+      "source_file": "tests/test_video_captions.py",
+      "source_location": "L67",
       "weight": 1.0
     },
     {
@@ -17292,6 +17338,18 @@
     },
     {
       "source": "tests_test_video_captions",
+      "target": "wave",
+      "relation": "imports",
+      "_origin": "ast",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "context": "import",
+      "source_file": "tests/test_video_captions.py",
+      "source_location": "L10",
+      "weight": 1.0
+    },
+    {
+      "source": "tests_test_video_captions",
       "target": "features_video_captions_ass_builder_groups",
       "relation": "imports",
       "_origin": "ast",
@@ -17299,7 +17357,7 @@
       "confidence_score": 1.0,
       "context": "import",
       "source_file": "tests/test_video_captions.py",
-      "source_location": "L11",
+      "source_location": "L14",
       "weight": 1.0
     },
     {
@@ -17311,7 +17369,7 @@
       "confidence_score": 1.0,
       "context": "import",
       "source_file": "tests/test_video_captions.py",
-      "source_location": "L11",
+      "source_location": "L14",
       "weight": 1.0
     },
     {
@@ -17323,7 +17381,7 @@
       "confidence_score": 1.0,
       "context": "import",
       "source_file": "tests/test_video_captions.py",
-      "source_location": "L12",
+      "source_location": "L15",
       "weight": 1.0
     },
     {
@@ -17335,7 +17393,7 @@
       "confidence_score": 1.0,
       "context": "import",
       "source_file": "tests/test_video_captions.py",
-      "source_location": "L12",
+      "source_location": "L15",
       "weight": 1.0
     },
     {
@@ -17347,7 +17405,7 @@
       "confidence_score": 1.0,
       "context": "import",
       "source_file": "tests/test_video_captions.py",
-      "source_location": "L12",
+      "source_location": "L15",
       "weight": 1.0
     },
     {
@@ -17359,7 +17417,7 @@
       "confidence_score": 1.0,
       "context": "import",
       "source_file": "tests/test_video_captions.py",
-      "source_location": "L13",
+      "source_location": "L16",
       "weight": 1.0
     },
     {
@@ -17371,12 +17429,12 @@
       "confidence_score": 1.0,
       "context": "import",
       "source_file": "tests/test_video_captions.py",
-      "source_location": "L13",
+      "source_location": "L16",
       "weight": 1.0
     },
     {
       "source": "tests_test_video_captions",
-      "target": "shutil",
+      "target": "importlib_util",
       "relation": "imports",
       "_origin": "ast",
       "confidence": "EXTRACTED",
@@ -17388,7 +17446,7 @@
     },
     {
       "source": "tests_test_video_captions",
-      "target": "subprocess",
+      "target": "io",
       "relation": "imports",
       "_origin": "ast",
       "confidence": "EXTRACTED",
@@ -17400,7 +17458,7 @@
     },
     {
       "source": "tests_test_video_captions",
-      "target": "tempfile",
+      "target": "shutil",
       "relation": "imports",
       "_origin": "ast",
       "confidence": "EXTRACTED",
@@ -17412,7 +17470,7 @@
     },
     {
       "source": "tests_test_video_captions",
-      "target": "threading",
+      "target": "subprocess",
       "relation": "imports",
       "_origin": "ast",
       "confidence": "EXTRACTED",
@@ -17424,7 +17482,7 @@
     },
     {
       "source": "tests_test_video_captions",
-      "target": "types",
+      "target": "tempfile",
       "relation": "imports",
       "_origin": "ast",
       "confidence": "EXTRACTED",
@@ -17436,7 +17494,7 @@
     },
     {
       "source": "tests_test_video_captions",
-      "target": "unittest",
+      "target": "threading",
       "relation": "imports",
       "_origin": "ast",
       "confidence": "EXTRACTED",
@@ -17444,6 +17502,30 @@
       "context": "import",
       "source_file": "tests/test_video_captions.py",
       "source_location": "L7",
+      "weight": 1.0
+    },
+    {
+      "source": "tests_test_video_captions",
+      "target": "types",
+      "relation": "imports",
+      "_origin": "ast",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "context": "import",
+      "source_file": "tests/test_video_captions.py",
+      "source_location": "L8",
+      "weight": 1.0
+    },
+    {
+      "source": "tests_test_video_captions",
+      "target": "unittest",
+      "relation": "imports",
+      "_origin": "ast",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "context": "import",
+      "source_file": "tests/test_video_captions.py",
+      "source_location": "L9",
       "weight": 1.0
     },
     {
@@ -19068,7 +19150,7 @@
     },
     {
       "source": "tests_test_video_captions",
-      "target": "features_video_captions_ass_builder",
+      "target": "pathlib",
       "relation": "imports_from",
       "_origin": "ast",
       "confidence": "EXTRACTED",
@@ -19080,7 +19162,7 @@
     },
     {
       "source": "tests_test_video_captions",
-      "target": "features_video_captions_transcribe",
+      "target": "unittest_mock",
       "relation": "imports_from",
       "_origin": "ast",
       "confidence": "EXTRACTED",
@@ -19092,6 +19174,30 @@
     },
     {
       "source": "tests_test_video_captions",
+      "target": "features_video_captions_ass_builder",
+      "relation": "imports_from",
+      "_origin": "ast",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "context": "import",
+      "source_file": "tests/test_video_captions.py",
+      "source_location": "L14",
+      "weight": 1.0
+    },
+    {
+      "source": "tests_test_video_captions",
+      "target": "features_video_captions_transcribe",
+      "relation": "imports_from",
+      "_origin": "ast",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "context": "import",
+      "source_file": "tests/test_video_captions.py",
+      "source_location": "L15",
+      "weight": 1.0
+    },
+    {
+      "source": "tests_test_video_captions",
       "target": "features_video_captions_pipeline",
       "relation": "imports_from",
       "_origin": "ast",
@@ -19099,31 +19205,7 @@
       "confidence_score": 1.0,
       "context": "import",
       "source_file": "tests/test_video_captions.py",
-      "source_location": "L13",
-      "weight": 1.0
-    },
-    {
-      "source": "tests_test_video_captions",
-      "target": "pathlib",
-      "relation": "imports_from",
-      "_origin": "ast",
-      "confidence": "EXTRACTED",
-      "confidence_score": 1.0,
-      "context": "import",
-      "source_file": "tests/test_video_captions.py",
-      "source_location": "L8",
-      "weight": 1.0
-    },
-    {
-      "source": "tests_test_video_captions",
-      "target": "unittest_mock",
-      "relation": "imports_from",
-      "_origin": "ast",
-      "confidence": "EXTRACTED",
-      "confidence_score": 1.0,
-      "context": "import",
-      "source_file": "tests/test_video_captions.py",
-      "source_location": "L9",
+      "source_location": "L16",
       "weight": 1.0
     },
     {
@@ -24572,7 +24654,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "README.md",
-      "source_location": "L239",
+      "source_location": "L241",
       "weight": 1.0
     },
     {
@@ -24583,7 +24665,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "README.md",
-      "source_location": "L264",
+      "source_location": "L266",
       "weight": 1.0
     },
     {
@@ -24594,7 +24676,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "README.md",
-      "source_location": "L321",
+      "source_location": "L323",
       "weight": 1.0
     },
     {
@@ -24924,7 +25006,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "tests/test_video_captions.py",
-      "source_location": "L16",
+      "source_location": "L19",
       "weight": 1.0
     },
     {
@@ -24935,7 +25017,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "tests/test_video_captions.py",
-      "source_location": "L41",
+      "source_location": "L44",
       "weight": 1.0
     },
     {
@@ -24946,29 +25028,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "tests/test_video_captions.py",
-      "source_location": "L65",
-      "weight": 1.0
-    },
-    {
-      "source": "tests_test_video_captions_probetests_test_raw_frame_render_preserves_audio",
-      "target": "tests_test_video_captions_probetests_test_raw_frame_render_preserves_audio_close",
-      "relation": "contains",
-      "_origin": "ast",
-      "confidence": "EXTRACTED",
-      "confidence_score": 1.0,
-      "source_file": "tests/test_video_captions.py",
-      "source_location": "L101",
-      "weight": 1.0
-    },
-    {
-      "source": "tests_test_video_captions_probetests_test_raw_frame_render_preserves_audio",
-      "target": "tests_test_video_captions_probetests_test_raw_frame_render_preserves_audio_tobytes",
-      "relation": "contains",
-      "_origin": "ast",
-      "confidence": "EXTRACTED",
-      "confidence_score": 1.0,
-      "source_file": "tests/test_video_captions.py",
-      "source_location": "L82",
+      "source_location": "L81",
       "weight": 1.0
     },
     {
@@ -24979,7 +25039,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "tests/test_video_captions.py",
-      "source_location": "L87",
+      "source_location": "L103",
       "weight": 1.0
     },
     {
@@ -24990,7 +25050,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "tests/test_video_captions.py",
-      "source_location": "L89",
+      "source_location": "L105",
       "weight": 1.0
     },
     {
@@ -25001,7 +25061,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "tests/test_video_captions.py",
-      "source_location": "L91",
+      "source_location": "L107",
       "weight": 1.0
     },
     {
@@ -25012,7 +25072,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "tests/test_video_captions.py",
-      "source_location": "L94",
+      "source_location": "L110",
       "weight": 1.0
     },
     {
@@ -25023,7 +25083,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "tests/test_video_captions.py",
-      "source_location": "L97",
+      "source_location": "L113",
       "weight": 1.0
     },
     {
@@ -25034,7 +25094,29 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "tests/test_video_captions.py",
-      "source_location": "L99",
+      "source_location": "L115",
+      "weight": 1.0
+    },
+    {
+      "source": "tests_test_video_captions_probetests_test_raw_frame_render_preserves_audio",
+      "target": "tests_test_video_captions_probetests_test_raw_frame_render_preserves_audio_close",
+      "relation": "contains",
+      "_origin": "ast",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "tests/test_video_captions.py",
+      "source_location": "L117",
+      "weight": 1.0
+    },
+    {
+      "source": "tests_test_video_captions_probetests_test_raw_frame_render_preserves_audio",
+      "target": "tests_test_video_captions_probetests_test_raw_frame_render_preserves_audio_tobytes",
+      "relation": "contains",
+      "_origin": "ast",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "tests/test_video_captions.py",
+      "source_location": "L98",
       "weight": 1.0
     },
     {
@@ -25045,7 +25127,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "tests/test_video_captions.py",
-      "source_location": "L48",
+      "source_location": "L51",
       "weight": 1.0
     },
     {
@@ -27014,7 +27096,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "tests/test_video_captions.py",
-      "source_location": "L17",
+      "source_location": "L20",
       "weight": 1.0
     },
     {
@@ -27025,7 +27107,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "tests/test_video_captions.py",
-      "source_location": "L31",
+      "source_location": "L34",
       "weight": 1.0
     },
     {
@@ -27036,7 +27118,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "tests/test_video_captions.py",
-      "source_location": "L67",
+      "source_location": "L83",
       "weight": 1.0
     },
     {
@@ -27047,7 +27129,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "tests/test_video_captions.py",
-      "source_location": "L79",
+      "source_location": "L95",
       "weight": 1.0
     },
     {
@@ -27058,7 +27140,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "tests/test_video_captions.py",
-      "source_location": "L42",
+      "source_location": "L45",
       "weight": 1.0
     },
     {
@@ -27069,7 +27151,18 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "tests/test_video_captions.py",
-      "source_location": "L45",
+      "source_location": "L48",
+      "weight": 1.0
+    },
+    {
+      "source": "tests_test_video_captions_transcriptiontests",
+      "target": "tests_test_video_captions_transcriptiontests_test_faster_whisper_decodes_real_wav",
+      "relation": "method",
+      "_origin": "ast",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "tests/test_video_captions.py",
+      "source_location": "L69",
       "weight": 1.0
     },
     {
@@ -29034,10 +29127,10 @@
       "confidence": "INFERRED",
       "confidence_score": 0.95,
       "source_file": "tests/test_video_captions.py",
-      "source_location": "L18",
+      "source_location": "L21",
       "weight": 0.8
     }
   ],
   "hyperedges": [],
-  "built_at_commit": "b5d5725da72668b46d3b8d1d19b70868f9a2b9b8"
+  "built_at_commit": "71b458d0cf6b9347633b39ce05c885b9190da120"
 }

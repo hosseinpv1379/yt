@@ -19,6 +19,8 @@ WORKDIR /app
 COPY --from=deno /deno /usr/local/bin/deno
 COPY requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
+# Exercise the real decoder without downloading or loading a Whisper model.
+RUN python -c "import io, wave; from faster_whisper.audio import decode_audio; f = io.BytesIO(); w = wave.open(f, 'wb'); w.setnchannels(1); w.setsampwidth(2); w.setframerate(16000); w.writeframes(bytes(3200)); w.close(); f.seek(0); assert len(decode_audio(f)) == 1600"
 COPY app ./app
 COPY features ./features
 
