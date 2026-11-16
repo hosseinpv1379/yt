@@ -21,6 +21,7 @@ from urllib.parse import urlencode, urlparse
 import httpx
 from openai import APIStatusError, OpenAI
 from pydub import AudioSegment
+from pydub.silence import detect_leading_silence
 from websockets.sync.client import connect
 import yt_dlp
 
@@ -263,18 +264,9 @@ def get_video_details(url: str, settings: Settings) -> tuple[list[int], float]:
 
 def get_public_youtube_title(url: str) -> str:
     """Best-effort title lookup for old orders, without using account cookies."""
-    options = {
-        "skip_download": True,
-        "quiet": True,
-        "no_warnings": True,
-        "noplaylist": True,
-        "socket_timeout": 3,
-        "retries": 0,
-        "fragment_retries": 0,
-        "no_cache_dir": True,
-    }
-    with yt_dlp.YoutubeDL(options) as ydl:
-        info = ydl.extract_info(url, download=False)
+    response = httpx.get("https://www.youtube.com/oembed", params={"url": url, "format": "json"}, timeout=3)
+    response.raise_for_status()
+    info = response.json()
     return re.sub(r"\s+", " ", str(info.get("title") or "")).strip()[:255]
 
 
@@ -915,6 +907,14 @@ def _synthesize_fitting_dub(text: str, slot_ms: int, audio_dir: Path, index: int
         tts_cost = _sum_known_costs(tts_cost, request_cost)
         if not speech:
             raise RuntimeError("سرویس دوبله صدای خالی برگرداند.")
+        # TTS can add long silent margins. Keep a small buffer around speech
+        # and never trim an entirely silent response based on this heuristic.
+        leading = detect_leading_silence(speech, silence_threshold=-45)
+        trailing = detect_leading_silence(speech.reverse(), silence_threshold=-45)
+        if leading + trailing < len(speech):
+            start = max(0, leading - 100)
+            end = min(len(speech), len(speech) - trailing + 100)
+            speech = speech[start:end]
         if best_speech is None or len(speech) < len(best_speech):
             best_speech = speech
         if len(speech) <= slot_ms * DUB_NORMAL_MAX_TEMPO:

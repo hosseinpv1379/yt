@@ -59,9 +59,10 @@ async def load_selection(database, settings, fallback_provider: str) -> ModelSel
     base = defaults(settings, fallback_provider)
     selected = {}
     for stage in STAGE_LABELS:
-        code = await database.get_setting(f'model_choice_{stage}', '')
+        legacy = await database.get_setting(f'model_choice_{stage}', '')
+        code = await database.get_setting(f'model_choice_{fallback_provider}_{stage}', legacy)
         option = BY_CODE.get(code)
-        selected[stage] = StageSelection(option.provider, option.model) if option and option.stage == stage else getattr(base, stage)
+        selected[stage] = StageSelection(option.provider, option.model) if option and option.stage == stage and option.provider == fallback_provider else getattr(base, stage)
     voice_provider = selected['tts'].provider
     default_voice = settings.openrouter_tts_voice if voice_provider == 'openrouter' else settings.tts_voice
     voice = await database.get_setting(f'model_voice_{voice_provider}', default_voice)

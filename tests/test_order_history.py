@@ -5,7 +5,8 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
-from app.bot import BotState, _order_active_link, orders_callback
+from telegram.error import BadRequest
+from app.bot import BotState, _edit_query_screen, _order_active_link, orders_callback
 
 
 class OrderLinkTests(unittest.TestCase):
@@ -37,6 +38,13 @@ class OrderLinkTests(unittest.TestCase):
 
 
 class OrderHistoryTests(unittest.IsolatedAsyncioTestCase):
+    async def test_identical_edits_are_ignored_but_other_errors_propagate(self):
+        query = SimpleNamespace(message=None, edit_message_text=AsyncMock(side_effect=BadRequest('Message is not modified')))
+        await _edit_query_screen(query, 'same')
+        query.edit_message_text.side_effect = BadRequest('Message to edit not found')
+        with self.assertRaises(BadRequest):
+            await _edit_query_screen(query, 'different')
+
     def context(self, db, user_id=11):
         state = BotState(SimpleNamespace(default_api_provider='openai', download_base_url='', download_dir='/tmp'), db)
         query = SimpleNamespace(data='', message=SimpleNamespace(chat=SimpleNamespace(type='private'), reply_text=AsyncMock()),

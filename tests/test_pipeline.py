@@ -136,6 +136,17 @@ class PipelineTests(unittest.TestCase):
         self.assertLessEqual(len(fitted), 1000)
         self.assertGreater(fitted[-80:].dBFS, -30)
 
+    def test_dub_removes_long_silent_margins_before_fitting(self):
+        speech = (AudioSegment.silent(duration=900, frame_rate=24000)
+                  + Sine(440, sample_rate=24000).to_audio_segment(duration=600)
+                  + AudioSegment.silent(duration=900, frame_rate=24000))
+        generate = Mock(return_value=(speech, 0.1))
+        with tempfile.TemporaryDirectory() as tmp:
+            fitted, cost, _ = _synthesize_fitting_dub('متن', 1000, Path(tmp), 0, generate, object(), '')
+        self.assertLessEqual(len(fitted), 1000)
+        self.assertGreater(fitted[150:650].dBFS, -30)
+        self.assertEqual(cost, 0.1)
+
     def test_dub_stops_after_bounded_retries(self):
         generate = Mock(return_value=(AudioSegment.silent(duration=3000), None))
         with patch('app.pipeline._shorten_dub_text', side_effect=[('کوتاه', None), ('کم', None)]):

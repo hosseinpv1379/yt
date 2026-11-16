@@ -25,24 +25,29 @@ class MemoryDB:
 
 
 class ModelSettingsTests(unittest.IsolatedAsyncioTestCase):
-    async def test_independent_choices_persist_and_snapshot(self):
+    async def test_choices_are_scoped_to_provider_and_legacy_choices_do_not_leak(self):
         db = MemoryDB()
         await db.set_setting('model_choice_stt', 's2')
         await db.set_setting('model_choice_translation', 't1')
         await db.set_setting('model_choice_tts', 'd2')
         await db.set_setting('model_voice_openrouter', 'Aoede')
         selected = await catalog.load_selection(db, settings(), 'openai')
-        self.assertEqual(selected.stt.model, 'openai/whisper-large-v3-turbo')
+        self.assertEqual(selected.stt.model, 'whisper-1')
         self.assertEqual(selected.translation.provider, 'openai')
-        self.assertEqual(selected.tts.provider, 'openrouter')
-        self.assertEqual(selected.voice, 'Aoede')
-        await db.set_setting('model_choice_stt', 's3')
-        self.assertEqual(selected.stt.model, 'openai/whisper-large-v3-turbo')
-        self.assertEqual((await catalog.load_selection(db, settings(), 'openai')).stt.model, 'openai/whisper-large-v3')
+        self.assertEqual(selected.tts.provider, 'openai')
+        router = await catalog.load_selection(db, settings(), 'openrouter')
+        self.assertEqual(router.stt.model, 'openai/whisper-large-v3-turbo')
+        self.assertEqual(router.tts.provider, 'openrouter')
+        self.assertEqual(router.voice, 'Aoede')
+        await db.set_setting('model_choice_openrouter_stt', 's3')
+        self.assertEqual(router.stt.model, 'openai/whisper-large-v3-turbo')
+        self.assertEqual((await catalog.load_selection(db, settings(), 'openrouter')).stt.model, 'openai/whisper-large-v3')
+        self.assertEqual((await catalog.load_selection(db, settings(), 'openai')).stt.model, 'whisper-1')
 
     async def test_admin_selection_and_access_control(self):
         db = MemoryDB()
         state = BotState(settings(), db)
+        state.api_provider = 'openrouter'
         query = SimpleNamespace(data='admin:setmodel:s2', answer=AsyncMock(), edit_message_text=AsyncMock())
         context = SimpleNamespace(application=SimpleNamespace(bot_data={'state': state}))
         update = SimpleNamespace(callback_query=query, effective_user=SimpleNamespace(id=1))
@@ -50,8 +55,12 @@ class ModelSettingsTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(db.data, {})
         update.effective_user.id = 99
         await admin_callback(update, context)
-        self.assertEqual(db.data['model_choice_stt'], 's2')
+        self.assertEqual(db.data['model_choice_openrouter_stt'], 's2')
         self.assertIn('whisper-large-v3-turbo', query.edit_message_text.call_args.args[0])
+        state.api_provider = 'openai'
+        await admin_callback(update, context)
+        self.assertNotIn('model_choice_openai_stt', db.data)
+        self.assertTrue(query.answer.call_args.kwargs['show_alert'])
 
     async def test_mixed_providers_route_to_correct_clients(self):
         config = settings()
@@ -94,6 +103,7 @@ class MinuteEstimateTests(unittest.IsolatedAsyncioTestCase):
         await db.set_setting('model_choice_translation', 't3')
         await db.set_setting('model_choice_tts', 'd2')
         state = BotState(settings(), db)
+        state.api_provider = 'openrouter'
         query = SimpleNamespace(edit_message_text=AsyncMock())
         await _show_model_settings(query, state)
         text = query.edit_message_text.call_args.args[0]

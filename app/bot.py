@@ -166,13 +166,17 @@ async def _edit_query_screen(query, text: str, **kwargs) -> None:
     message = getattr(query, "message", None)
     media_fields = ("photo", "video", "animation", "audio", "document", "voice", "video_note")
     has_media = message and any(getattr(message, field, None) for field in media_fields)
-    if message and (getattr(message, "caption", None) is not None or has_media):
-        kwargs.pop("disable_web_page_preview", None)
-        if len(text) > 1024:
-            text = text[:1021] + "..."
-        await query.edit_message_caption(caption=text, **kwargs)
-        return
-    await query.edit_message_text(text, **kwargs)
+    try:
+        if message and (getattr(message, "caption", None) is not None or has_media):
+            kwargs.pop("disable_web_page_preview", None)
+            if len(text) > 1024:
+                text = text[:1021] + "..."
+            await query.edit_message_caption(caption=text, **kwargs)
+            return
+        await query.edit_message_text(text, **kwargs)
+    except BadRequest as exc:
+        if "message is not modified" not in str(exc).lower():
+            raise
 
 
 async def _show_screen(update: Update, text: str, **kwargs) -> None:
@@ -1138,8 +1142,8 @@ async def _show_model_settings(query, state: BotState) -> None:
 async def _show_model_options(query, state: BotState, stage: str) -> None:
     selection = await model_catalog.load_selection(state.database, state.settings, state.api_provider)
     current = getattr(selection, stage)
-    options = [o for o in model_catalog.OPTIONS if o.stage == stage]
-    lines = [f"🤖 {model_catalog.STAGE_LABELS[stage]}", ""]
+    options = [o for o in model_catalog.OPTIONS if o.stage == stage and o.provider == state.api_provider]
+    lines = [f"🤖 {model_catalog.STAGE_LABELS[stage]} · {_provider_label(state.api_provider)}", ""]
     buttons = []
     for index, option in enumerate(options, 1):
         selected = option.model == current.model and option.provider == current.provider
@@ -1262,14 +1266,14 @@ async def admin_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         return
     if len(action) == 3 and action[1] == "setmodel":
         option = model_catalog.BY_CODE.get(action[2])
-        if not option:
+        if not option or option.provider != state.api_provider:
             await query.answer("مدل نامعتبر است.", show_alert=True)
             return
         key = state.settings.openai_api_key if option.provider == "openai" else state.settings.openrouter_api_key
         if not key:
             await query.answer("کلید این سرویس در سرور تنظیم نشده است.", show_alert=True)
             return
-        await state.database.set_setting(f"model_choice_{option.stage}", option.code)
+        await state.database.set_setting(f"model_choice_{option.provider}_{option.stage}", option.code)
         await query.answer("مدل ذخیره شد.")
         await _show_model_options(query, state, option.stage)
         return
