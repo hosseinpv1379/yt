@@ -1,9 +1,11 @@
 FROM python:3.10-slim
-ENV PYTHONUNBUFFERED=1 PIP_NO_CACHE_DIR=1 MODEL_PATH=/models CUDA_VISIBLE_DEVICES=-1 \
+ENV PYTHONUNBUFFERED=1 PIP_NO_CACHE_DIR=1 PIP_DEFAULT_TIMEOUT=180 PIP_RETRIES=8 MODEL_PATH=/models CUDA_VISIBLE_DEVICES=-1 \
     TF_NUM_INTRAOP_THREADS=2 TF_NUM_INTEROP_THREADS=1 OMP_NUM_THREADS=2
 RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg libsndfile1 ca-certificates \
     && rm -rf /var/lib/apt/lists/*
-RUN pip install --no-cache-dir spleeter==2.4.2
+# Use a current resolver and tolerate slow reads from the large ARM64 TensorFlow wheels.
+RUN python -m pip install --no-cache-dir --timeout=180 --retries=8 --upgrade pip \
+    && python -m pip install --no-cache-dir --timeout=180 --retries=8 spleeter==2.4.2
 RUN useradd --create-home --uid 10001 appuser
 WORKDIR /app
 COPY separator/server.py /app/server.py
