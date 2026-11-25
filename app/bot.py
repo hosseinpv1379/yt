@@ -137,6 +137,15 @@ class PendingQuality:
     dub_mode: str = "simple"
     probing: bool = False
     available_heights: list[int] = field(default_factory=list)
+    stage: str = "mode"
+
+
+@dataclass
+class UserFlow:
+    stage: str
+    token: str
+    back_action: str = "menu:home"
+    payload: str | None = None
 
 
 class BotState:
@@ -147,6 +156,7 @@ class BotState:
         self.active: dict[int, Job | DownloadJob | ContentJob | ImageJob] = {}
         self.pending_quality: dict[str, PendingQuality] = {}
         self.pending_by_user: dict[int, str] = {}
+        self.user_flows: dict[int, UserFlow] = {}
         self.admin_editing: dict[int, str] = {}
         self.awaiting_topup: set[int] = set()
         self.awaiting_support: set[int] = set()
@@ -158,9 +168,96 @@ class BotState:
         self.image_references: dict[int, tuple[bytes, str]] = {}
         self.api_provider = settings.default_api_provider
 
+    def current_stage(self, user_id: int) -> str:
+        """Return the user's single active conversation stage."""
+        flow = self.user_flows.get(user_id)
+        if flow:
+            return flow.stage
+        if user_id in self.active:
+            return "processing"
+        token = self.pending_by_user.get(user_id)
+        selection = self.pending_quality.get(token) if token else None
+        if selection:
+            return selection.stage
+        return "idle"
+
+    def track_stage(
+        self, user_id: int, stage: str, token: str, back_action: str = "menu:home"
+    ) -> UserFlow:
+        flow = UserFlow(stage, token, back_action)
+        self.user_flows[user_id] = flow
+        return flow
+
+    def clear_stage(self, user_id: int, token: str | None = None) -> bool:
+        flow = self.user_flows.get(user_id)
+        if not flow or (token and flow.token != token):
+            return False
+        self.user_flows.pop(user_id, None)
+        return True
+
 
 def _state(context: ContextTypes.DEFAULT_TYPE) -> BotState:
     return context.application.bot_data["state"]
+
+
+def _clear_user_input(state: BotState, user_id: int, token: str | None = None) -> bool:
+    """Clear a user's transient conversation step, optionally by flow token."""
+    flow = state.user_flows.get(user_id)
+    if token and (not flow or flow.token != token):
+        return False
+    video_pending = getattr(state, "video_captions_pending", {})
+    video_flow = video_pending.get(user_id)
+    preserve_confirming_video = bool(
+        video_flow and video_flow.get("confirming") and flow
+        and flow.stage.startswith("video_") and flow.token == video_flow.get("token")
+    )
+    if not preserve_confirming_video:
+        state.user_flows.pop(user_id, None)
+    if video_flow and not video_flow.get("confirming"):
+        video_pending.pop(user_id, None)
+    state.admin_editing.pop(user_id, None)
+    state.awaiting_topup.discard(user_id)
+    state.awaiting_support.discard(user_id)
+    state.subtitle_editing.pop(user_id, None)
+    state.awaiting_image_prompt.discard(user_id)
+    return True
+
+
+def _begin_user_flow(
+    state: BotState, user_id: int, stage: str, *, back_action: str = "menu:home",
+    payload: str | None = None,
+) -> UserFlow:
+    """Replace any previous text-input stage and return its fresh callback token."""
+    _clear_user_input(state, user_id)
+    flow = UserFlow(stage, uuid.uuid4().hex[:12], back_action, payload)
+    state.user_flows[user_id] = flow
+    return flow
+
+
+def _begin_admin_input(state: BotState, user_id: int, key: str) -> UserFlow:
+    flow = _begin_user_flow(
+        state, user_id, "admin_value", back_action="admin:refresh", payload=key
+    )
+    state.admin_editing[user_id] = key
+    return flow
+
+
+def _flow_keyboard(flow: UserFlow, *, include_back: bool = True) -> InlineKeyboardMarkup:
+    return ui.cancel_keyboard(
+        f"flow_cancel:{flow.token}",
+        flow.back_action if include_back else None,
+    )
+
+
+def _flow_cancel_text(stage: str) -> str:
+    return {
+        "admin_value": "تغییر تنظیمات لغو شد.",
+        "topup_amount": "درخواست وارد کردن مبلغ لغو شد.",
+        "support_message": "نوشتن پیام پشتیبانی لغو شد.",
+        "subtitle_edit": "ویرایش زیرنویس لغو شد.",
+        "image_prompt": "ساخت تصویر لغو شد.",
+        "new_order_link": "شروع سفارش لغو شد.",
+    }.get(stage, "مرحلهٔ فعلی لغو شد.")
 
 
 async def _load_admin_settings(database: Database, settings: Settings) -> Settings:
@@ -304,11 +401,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await message.reply_text("برای حفظ حریم خصوصی، ربات را در گفت‌وگوی خصوصی باز کن.")
         return
     await state.database.upsert_user(user, True)
-    state.awaiting_topup.discard(user.id)
-    state.awaiting_support.discard(user.id)
-    state.subtitle_editing.pop(user.id, None)
-    state.admin_editing.pop(user.id, None)
-    state.awaiting_image_prompt.discard(user.id)
+    _clear_user_input(state, user.id)
     state.image_references.pop(user.id, None)
     if not state.image_quotes.get(str(user.id), {}).get("confirming"):
         state.image_quotes.pop(str(user.id), None)
@@ -321,20 +414,53 @@ async def receive_link(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     state = _state(context)
     if not user or not message or not message.text:
         return
-    await state.database.upsert_user(user, True)
-    if user.id in state.admin_editing:
-        await _save_admin_value(update, state, context.application)
-        return
     if message.chat.type != "private":
         await message.reply_text("برای حفظ حریم خصوصی، لطفاً در گفت‌وگوی خصوصی ربات پیام بده.")
         return
+    await state.database.upsert_user(user, True)
+    flow = state.user_flows.get(user.id)
+    if flow:
+        if flow.stage == "admin_value":
+            await _save_admin_value(update, state, context.application)
+        elif flow.stage == "support_message":
+            await _send_support_request(update, context, message.text)
+        elif flow.stage == "topup_amount":
+            await _create_charge_request(update, context, message.text)
+        elif flow.stage == "subtitle_edit":
+            await _receive_subtitle_edit(update, context)
+        elif flow.stage == "image_prompt":
+            await _receive_image_prompt(update, context)
+        elif flow.stage == "new_order_link":
+            if not validate_youtube_url(message.text.strip()):
+                await message.reply_text(
+                    "لینک ویدیوی یوتیوب را بفرست یا درخواست را لغو کن.",
+                    reply_markup=_flow_keyboard(flow),
+                )
+                return
+            _clear_user_input(state, user.id, flow.token)
+        elif flow.stage.startswith("video_"):
+            await message.reply_text(
+                "برای ادامه از دکمه‌های مرحله استفاده کن؛ برای لغو دکمهٔ زیر را بزن.",
+                reply_markup=ui.cancel_keyboard(
+                    f"vclip:cancel:{flow.token}", "menu:services"
+                ),
+            )
+            return
+        else:
+            await message.reply_text("این مرحله پیام متنی نمی‌پذیرد.")
+            return
+        if flow.stage != "new_order_link":
+            return
     url = message.text.strip()
     source_type = "youtube" if validate_youtube_url(url) else None
-    if user.id in state.awaiting_support:
-        await _send_support_request(update, context, url)
-        return
-    if user.id in state.awaiting_topup and not source_type:
-        await _create_charge_request(update, context, url)
+    video_pending = context.application.bot_data.get("video_captions_pending", {}).get(user.id)
+    if video_pending and video_pending.get("stage") == "video":
+        await message.reply_text(
+            "منتظر دریافت ویدیو هستم؛ برای لغو از دکمهٔ همین درخواست استفاده کن.",
+            reply_markup=ui.cancel_keyboard(
+                f"vclip:cancel:{video_pending['token']}", "menu:services"
+            ),
+        )
         return
     if source_type:
         state.awaiting_topup.discard(user.id)
@@ -394,7 +520,8 @@ async def choose_download(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         await query.answer("انتخاب نامعتبر است.", show_alert=True)
         return
     selection = state.pending_quality.get(token)
-    if (not selection or selection.user_id != user.id or selection.confirming
+    if (not selection or selection.user_id != user.id
+            or state.pending_by_user.get(user.id) != token or selection.confirming
             or selection.download_source not in {"social", "spotify"}
             or kind not in {"video", "audio", "media", "profile"}
             or (kind == "media" and (selection.download_source != "social" or not is_instagram_media_url(selection.url)))
@@ -405,6 +532,7 @@ async def choose_download(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         await query.answer("این انتخاب دیگر معتبر نیست.", show_alert=True)
         return
     selection.confirming = True
+    selection.stage = "confirming"
     try:
         await query.answer()
     except Exception:
@@ -415,14 +543,16 @@ async def choose_download(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         await state.database.create_download_task(job_id, user.id, selection.chat_id, selection.url, kind)
     except Exception:
         state.pending_quality.pop(token, None)
-        state.pending_by_user.pop(user.id, None)
+        if state.pending_by_user.get(user.id) == token:
+            state.pending_by_user.pop(user.id, None)
         logger.exception("Could not persist download order %s", job_id)
         await _edit_query_screen(query, "ثبت درخواست دانلود ممکن نشد؛ دوباره تلاش کن.", reply_markup=ui.back_keyboard())
         return
     job = DownloadJob(job_id, user.id, selection.chat_id, selection.url, selection.message_id,
                       Path(state.settings.work_dir) / job_id, kind, selection.download_source)
     state.pending_quality.pop(token, None)
-    state.pending_by_user.pop(user.id, None)
+    if state.pending_by_user.get(user.id) == token:
+        state.pending_by_user.pop(user.id, None)
     state.active[user.id] = job
     await state.queue.put(job)
     await _edit_query_screen(query, "📥 درخواست دانلود در صف ثبت شد.", reply_markup=ui.job_keyboard(job.id))
@@ -443,13 +573,16 @@ async def choose_mode(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         await query.answer("این انتخاب معتبر نیست.", show_alert=True)
         return
     selection = state.pending_quality.get(token)
-    if not selection or selection.user_id != user.id or selection.confirming or selection.probing:
+    if (not selection or selection.user_id != user.id
+            or state.pending_by_user.get(user.id) != token
+            or selection.stage != "mode" or selection.confirming or selection.probing):
         await query.answer("این انتخاب منقضی شده؛ لینک را دوباره بفرست.", show_alert=True)
         return
 
     await query.answer()
     selection.mode = mode
     if mode == "dub":
+        selection.stage = "dub_mode"
         await _edit_query_screen(query,
             "🎙 روش دوبله را انتخاب کن:\n"
             "ساده: سریع‌تر.\n"
@@ -458,9 +591,11 @@ async def choose_mode(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
                 [InlineKeyboardButton("🎧 دوبلهٔ ساده", callback_data=f"dubmode:{token}:simple")],
                 [InlineKeyboardButton("✨ دوبلهٔ هوشمند", callback_data=f"dubmode:{token}:smart")],
                 [InlineKeyboardButton("↩️ بازگشت", callback_data=f"order_back:{token}")],
+                [ui.button("✕ لغو سفارش", f"order_cancel:{token}", style="danger")],
             ]),
         )
         return
+    selection.stage = "probing"
     await _probe_order(query, context, selection, token)
 
 
@@ -470,13 +605,24 @@ async def choose_dub_mode(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         return
     parts = (query.data or "").split(":")
     selection = _state(context).pending_quality.get(parts[1]) if len(parts) == 3 else None
-    if not selection or selection.user_id != user.id or selection.mode != "dub" or selection.confirming or selection.probing or parts[2] not in {"simple", "smart"}:
+    if (not selection or selection.user_id != user.id
+            or _state(context).pending_by_user.get(user.id) != parts[1]
+            or selection.stage != "dub_mode" or selection.mode != "dub"
+            or selection.confirming or selection.probing
+            or parts[2] not in {"simple", "smart"}):
         await query.answer("این انتخاب دیگر معتبر نیست.", show_alert=True)
         return
+    selection.stage = "checking_dub_mode"
     if parts[2] == "smart" and not await _separator_available(_state(context).settings):
+        selection.stage = "dub_mode"
         await query.answer("دوبلهٔ هوشمند فعلاً در دسترس نیست؛ دوبلهٔ ساده را انتخاب کن یا با پشتیبانی تماس بگیر.", show_alert=True)
         return
+    if (_state(context).pending_quality.get(parts[1]) is not selection
+            or _state(context).pending_by_user.get(user.id) != parts[1]):
+        await query.answer("این سفارش لغو شده است.", show_alert=True)
+        return
     selection.dub_mode = parts[2]
+    selection.stage = "probing"
     await query.answer()
     await _probe_order(query, context, selection, parts[1])
 
@@ -494,7 +640,11 @@ async def _separator_available(settings: Settings) -> bool:
 
 async def _probe_order(query, context, selection: PendingQuality, token: str) -> None:
     state = _state(context)
+    if (state.pending_quality.get(token) is not selection
+            or state.pending_by_user.get(selection.user_id) != token):
+        return
     selection.probing = True
+    selection.stage = "probing"
     try:
         await _edit_query_screen(query, _progress_text("بررسی کیفیت‌های موجود", 0))
         heights, duration, title = await asyncio.to_thread(
@@ -529,6 +679,7 @@ async def _probe_order(query, context, selection: PendingQuality, token: str) ->
         return
     selection.probing = False
     selection.available_heights = heights
+    selection.stage = "quality"
 
     mode_label = "زیرنویس فارسی" if selection.mode == "subtitle" else ("دوبلهٔ هوشمند" if selection.dub_mode == "smart" else "دوبلهٔ ساده")
     await context.application.bot.edit_message_text(
@@ -550,12 +701,22 @@ async def choose_quality(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         await query.answer("این انتخاب معتبر نیست.", show_alert=True)
         return
     selection = state.pending_quality.get(token)
-    if not selection or selection.user_id != user.id or not selection.mode or selection.probing or selection.confirming:
+    if (not selection or selection.user_id != user.id
+            or state.pending_by_user.get(user.id) != token
+            or selection.stage != "quality"
+            or not selection.mode or selection.probing or selection.confirming):
         await query.answer("این انتخاب منقضی شده؛ لینک را دوباره بفرست.", show_alert=True)
         return
-    if not await state.database.has_accepted_terms(user.id):
+    selection.stage = "pricing"
+    try:
+        accepted_terms = await state.database.has_accepted_terms(user.id)
+    except Exception:
+        selection.stage = "quality"
+        raise
+    if not accepted_terms:
         state.pending_quality.pop(token, None)
-        state.pending_by_user.pop(user.id, None)
+        if state.pending_by_user.get(user.id) == token:
+            state.pending_by_user.pop(user.id, None)
         await query.answer("برای ادامه، شرایط استفاده را بخوان و تأیید کن.", show_alert=True)
         await _edit_query_screen(query,
             "قبل از ادامه، شرایط استفاده را بخوان و تأیید کن.",
@@ -566,6 +727,7 @@ async def choose_quality(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         )
         return
     if user.id in state.active:
+        selection.stage = "quality"
         await query.answer("یک کار در حال اجرا داری.", show_alert=True)
         return
 
@@ -573,15 +735,24 @@ async def choose_quality(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     rate_key = "price_subtitle_toman_per_minute" if mode == "subtitle" else "price_dub_toman_per_minute"
     default_rate = (state.settings.default_subtitle_price_toman_per_minute
                     if mode == "subtitle" else state.settings.default_dub_price_toman_per_minute)
-    rate = max(1, int(await state.database.get_setting(rate_key, str(default_rate))))
-    minutes = max(1, ceil(selection.duration_seconds / 60))
-    amount = minutes * rate
+    try:
+        rate = max(1, int(await state.database.get_setting(rate_key, str(default_rate))))
+        minutes = max(1, ceil(selection.duration_seconds / 60))
+        amount = minutes * rate
+        balance = await state.database.get_wallet_balance(user.id)
+        packages = await state.database.available_minutes(user.id)
+    except Exception:
+        selection.stage = "quality"
+        raise
+    if (state.pending_quality.get(token) is not selection
+            or state.pending_by_user.get(user.id) != token):
+        await query.answer("این سفارش لغو شده است.", show_alert=True)
+        return
     selection.selected_height = selected_height
     selection.quoted_rate = rate
+    selection.stage = "payment"
     quality = "خودکار" if selected_height is None else f"{selected_height}p"
     mode_label = "زیرنویس فارسی" if mode == "subtitle" else ("دوبلهٔ هوشمند" if selection.dub_mode == "smart" else "دوبلهٔ ساده")
-    balance = await state.database.get_wallet_balance(user.id)
-    packages = await state.database.available_minutes(user.id)
     package = next((p for p in packages if p["mode"] == mode and p["minutes"] >= minutes), None)
     package_note = f"\nبستهٔ قابل استفاده: {package['minutes']} دقیقه" if package else ""
     await query.answer()
@@ -606,13 +777,18 @@ async def confirm_order(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     token = parts[1]
     package_id = parts[2] if len(parts) == 3 else None
     selection = state.pending_quality.get(token)
-    if not selection or selection.user_id != user.id or not selection.mode or not selection.quoted_rate or selection.confirming:
+    if (not selection or selection.user_id != user.id
+            or state.pending_by_user.get(user.id) != token
+            or selection.stage != "payment"
+            or not selection.mode or not selection.quoted_rate or selection.confirming):
         await query.answer("این سفارش دیگر قابل تأیید نیست.", show_alert=True)
         return
     selection.confirming = True
+    selection.stage = "confirming"
     mode = selection.mode
     if mode == "dub" and selection.dub_mode == "smart" and not await _separator_available(state.settings):
         selection.confirming = False
+        selection.stage = "payment"
         await query.answer("دوبلهٔ هوشمند فعلاً در دسترس نیست؛ هزینه‌ای کسر نشد.", show_alert=True)
         return
     selected_height = selection.selected_height
@@ -629,6 +805,7 @@ async def confirm_order(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         )}
         if missing:
             selection.confirming = False
+            selection.stage = "payment"
             await query.answer("پردازشگر سفارش تنظیم نشده است؛ لطفاً با پشتیبانی تماس بگیر.", show_alert=True)
             return
         await query.answer()
@@ -646,6 +823,7 @@ async def confirm_order(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 
     except Exception:
         selection.confirming = False
+        selection.stage = "payment"
         raise
     state.pending_quality.pop(token, None)
     state.pending_by_user.pop(user.id, None)
@@ -699,11 +877,15 @@ async def back_to_mode(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         return
     token = (query.data or "").partition(":")[2]
     selection = _state(context).pending_quality.get(token)
-    if not selection or selection.user_id != user.id or selection.confirming or selection.probing:
+    if (not selection or selection.user_id != user.id
+            or _state(context).pending_by_user.get(user.id) != token
+            or selection.stage not in {"quality", "dub_mode"}
+            or selection.confirming or selection.probing):
         await query.answer("این سفارش دیگر فعال نیست.", show_alert=True)
         return
     selection.mode = None
     selection.quoted_rate = 0
+    selection.stage = "mode"
     await query.answer()
     await _edit_query_screen(query,
         "🎬 سفارش جدید  ·  ۱ از ۳\n\nنوع خروجی را انتخاب کن:",
@@ -717,10 +899,14 @@ async def back_to_quality(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         return
     token = (query.data or "").partition(":")[2]
     selection = _state(context).pending_quality.get(token)
-    if not selection or selection.user_id != user.id or not selection.mode or selection.probing or selection.confirming:
+    if (not selection or selection.user_id != user.id
+            or _state(context).pending_by_user.get(user.id) != token
+            or selection.stage != "payment"
+            or not selection.mode or selection.probing or selection.confirming):
         await query.answer("این سفارش دیگر فعال نیست.", show_alert=True)
         return
     selection.quoted_rate = 0
+    selection.stage = "quality"
     await query.answer()
     await _edit_query_screen(query, "🎬 کیفیت ویدیو را انتخاب کن:", reply_markup=ui.quality_keyboard(token, selection.available_heights))
 
@@ -732,13 +918,63 @@ async def cancel_order_callback(update: Update, context: ContextTypes.DEFAULT_TY
     state = _state(context)
     token = (query.data or "").partition(":")[2]
     selection = state.pending_quality.get(token)
-    if not selection or selection.user_id != user.id or selection.confirming:
+    if (not selection or selection.user_id != user.id
+            or state.pending_by_user.get(user.id) != token or selection.confirming):
         await query.answer("این سفارش دیگر قابل لغو نیست.", show_alert=True)
         return
     state.pending_quality.pop(token, None)
     state.pending_by_user.pop(user.id, None)
     await query.answer()
     await _edit_query_screen(query, "سفارش لغو شد.", reply_markup=ui.back_keyboard())
+
+
+async def flow_cancel_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query, user = update.callback_query, update.effective_user
+    if not query or not user:
+        return
+    token = (query.data or "").partition(":")[2]
+    if not await _cancel_user_flow(update, context, token):
+        await query.answer("این مرحله قبلاً تمام شده است.", show_alert=True)
+
+
+async def _cancel_user_flow(
+    update: Update, context: ContextTypes.DEFAULT_TYPE, token: str | None = None
+) -> bool:
+    user = update.effective_user
+    if not user:
+        return False
+    state = _state(context)
+    flow = state.user_flows.get(user.id)
+    if not flow or (token and flow.token != token):
+        return False
+    if not _clear_user_input(state, user.id, flow.token):
+        return False
+    if flow.stage == "image_prompt":
+        state.image_references.pop(user.id, None)
+        quote = state.image_quotes.get(str(user.id))
+        if quote and not quote.get("confirming"):
+            state.image_quotes.pop(str(user.id), None)
+    text = _flow_cancel_text(flow.stage)
+    query = update.callback_query
+    if query:
+        await query.answer()
+        if flow.stage == "admin_value":
+            await _edit_query_screen(query, text)
+            if query.message:
+                await _show_admin_panel(query.message.reply_text, state, user.id)
+        else:
+            await _edit_query_screen(
+                query, text, reply_markup=ui.back_keyboard(flow.back_action)
+            )
+        return True
+    message = update.effective_message
+    if not message:
+        return True
+    if flow.stage == "admin_value":
+        await _return_to_admin_panel(message.reply_text, state, user.id, text)
+    else:
+        await message.reply_text(text, reply_markup=ui.back_keyboard(flow.back_action))
+    return True
 
 
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -752,7 +988,10 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             await message.reply_text("در حال ثبت سفارش هستیم؛ چند لحظه صبر کن.")
             return
         context.application.bot_data["video_captions_pending"].pop(user.id, None)
+        _clear_user_input(state, user.id)
         await message.reply_text("درخواست ویرایش ویدیو لغو شد.", reply_markup=ui.back_keyboard())
+        return
+    if await _cancel_user_flow(update, context):
         return
     await state.database.upsert_user(user, True)
     if state.subtitle_editing.pop(user.id, None):
@@ -875,6 +1114,7 @@ async def pricing(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not user or not message:
         return
     state = _state(context)
+    _clear_user_input(state, user.id)
     subtitle = int(await state.database.get_setting(
         "price_subtitle_toman_per_minute", str(state.settings.default_subtitle_price_toman_per_minute)
     ))
@@ -897,6 +1137,7 @@ async def balance(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if message.chat.type != "private":
         await message.reply_text("موجودی فقط در گفت‌وگوی خصوصی نمایش داده می‌شود.")
         return
+    _clear_user_input(_state(context), user.id)
     await _state(context).database.upsert_user(user, True)
     amount = await _state(context).database.get_wallet_balance(user.id)
     await _show_screen(update,
@@ -912,6 +1153,8 @@ async def charge_wallet(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     if message.chat.type != "private":
         await message.reply_text("برای امنیت اطلاعات کارت، درخواست شارژ را در گفت‌وگوی خصوصی ربات ثبت کن.")
         return
+    if context.args:
+        _clear_user_input(_state(context), user.id)
     state = _state(context)
     if not state.settings.card_to_card_number or not state.settings.card_to_card_holder:
         await message.reply_text("اطلاعات کارت مقصد هنوز تنظیم نشده است؛ مدیر را از طریق /paysupport مطلع کن.")
@@ -937,7 +1180,7 @@ async def _prompt_topup(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         return
     state = _state(context)
     back_action = "wallet:balance" if update.callback_query else "menu:home"
-    state.awaiting_support.discard(user.id)
+    _clear_user_input(state, user.id)
     if not state.settings.card_to_card_number or not state.settings.card_to_card_holder:
         await _show_screen(update, "شارژ در حال حاضر در دسترس نیست؛ با پشتیبانی تماس بگیر.",
                            reply_markup=ui.back_keyboard(back_action))
@@ -957,17 +1200,19 @@ async def _prompt_topup(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
                 f"شماره کارت: {state.settings.card_to_card_number}\n"
                 f"به نام: {state.settings.card_to_card_holder}\n"
                 "رسید یا شمارهٔ پیگیری را بفرست.",
-                reply_markup=ui.back_keyboard(back_action))
+                reply_markup=ui.cancel_keyboard(
+                    f"deposit:cancel:{pending['id']}", back_action
+                ))
         else:
             await _show_screen(update, "⏳ رسیدت در حال بررسی است.",
                                reply_markup=ui.back_keyboard(back_action))
         return
-    state.awaiting_support.discard(user.id)
+    flow = _begin_user_flow(state, user.id, "topup_amount", back_action=back_action)
     state.awaiting_topup.add(user.id)
     await _show_screen(update,
         f"💳 شارژ کیف پول\nمبلغ را به تومان بفرست.\n"
         f"حداقل: {state.settings.minimum_wallet_topup_toman:,} تومان",
-        reply_markup=ui.back_keyboard(back_action))
+        reply_markup=_flow_keyboard(flow))
 
 
 async def _create_charge_request(update: Update, context: ContextTypes.DEFAULT_TYPE, raw_amount: str) -> None:
@@ -976,11 +1221,11 @@ async def _create_charge_request(update: Update, context: ContextTypes.DEFAULT_T
         return
     state = _state(context)
     if not state.settings.card_to_card_number or not state.settings.card_to_card_holder:
-        state.awaiting_topup.discard(user.id)
+        _clear_user_input(state, user.id)
         await message.reply_text("شارژ در حال حاضر در دسترس نیست.", reply_markup=ui.back_keyboard())
         return
     if not await state.database.has_accepted_terms(user.id):
-        state.awaiting_topup.discard(user.id)
+        _clear_user_input(state, user.id)
         await message.reply_text("برای شارژ، ابتدا شرایط استفاده را بپذیر.",
             reply_markup=InlineKeyboardMarkup([
                 [ui.button("📜 شرایط استفاده", "terms:show", style="primary")],
@@ -992,11 +1237,12 @@ async def _create_charge_request(update: Update, context: ContextTypes.DEFAULT_T
         if not state.settings.minimum_wallet_topup_toman <= amount <= 1_000_000_000:
             raise ValueError
     except ValueError:
+        flow = state.user_flows.get(user.id)
         await message.reply_text(
-            f"مبلغ را به عدد و بین {state.settings.minimum_wallet_topup_toman:,} تا 1,000,000,000 تومان بفرست.")
+            f"مبلغ را به عدد و بین {state.settings.minimum_wallet_topup_toman:,} تا 1,000,000,000 تومان بفرست.",
+            reply_markup=_flow_keyboard(flow) if flow else None)
         return
-    state.awaiting_topup.discard(user.id)
-    state.awaiting_support.discard(user.id)
+    _clear_user_input(state, user.id)
     await state.database.upsert_user(user, True)
     request_id = uuid.uuid4().hex
     created = await state.database.create_deposit_request(request_id, user.id, message.chat_id, amount)
@@ -1007,7 +1253,8 @@ async def _create_charge_request(update: Update, context: ContextTypes.DEFAULT_T
                 f"یک درخواست باز برای {pending['amount_toman']:,} تومان داری.\n"
                 f"شماره کارت: {state.settings.card_to_card_number}\n"
                 f"به نام: {state.settings.card_to_card_holder}\n\n"
-                "رسید/شماره پیگیری را بفرست یا /cancel کن."
+                "رسید/شماره پیگیری را بفرست یا درخواست را با دکمهٔ زیر لغو کن.",
+                reply_markup=ui.cancel_keyboard(f"deposit:cancel:{pending['id']}", "wallet:balance"),
             )
         else:
             await message.reply_text("یک رسید در حال بررسی داری؛ برای ایجاد درخواست تازه صبر کن تا مدیر نتیجه را اعلام کند.")
@@ -1018,7 +1265,8 @@ async def _create_charge_request(update: Update, context: ContextTypes.DEFAULT_T
         f"شماره کارت: <code>{state.settings.card_to_card_number}</code>\n"
         f"به نام: <b>{escape(state.settings.card_to_card_holder)}</b>\n\n"
         "پس از واریز، رسید را بفرست. پس از تأیید مدیر، کیف پول شارژ می‌شود.",
-        parse_mode="HTML", reply_markup=ui.back_keyboard("wallet:balance"),
+        parse_mode="HTML",
+        reply_markup=ui.cancel_keyboard(f"deposit:cancel:{request_id}", "wallet:balance"),
     )
 
 
@@ -1029,6 +1277,7 @@ async def history(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if message.chat.type != "private":
         await message.reply_text("گردش حساب فقط در گفت‌وگوی خصوصی نمایش داده می‌شود.")
         return
+    _clear_user_input(_state(context), user.id)
     rows = await _state(context).database.wallet_history(user.id)
     if not rows:
         await _show_screen(update, "📒 هنوز تراکنشی ثبت نشده است.", reply_markup=ui.wallet_keyboard())
@@ -1056,6 +1305,7 @@ async def terms(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user, message = update.effective_user, update.effective_message
     if not user or not message:
         return
+    _clear_user_input(_state(context), user.id)
     await _show_screen(update,
         "📜 شرایط استفاده و حریم خصوصی\n\n"
         "• هزینه پیش از تأیید نمایش داده می‌شود.\n"
@@ -1082,15 +1332,18 @@ async def payment_support(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         return
     detail = " ".join(context.args).strip() if not update.callback_query else ""
     if detail:
+        _clear_user_input(_state(context), user.id)
         await _send_support_request(update, context, detail)
         return
     state = _state(context)
-    state.awaiting_topup.discard(user.id)
+    flow = _begin_user_flow(state, user.id, "support_message", back_action="menu:support")
     state.awaiting_support.add(user.id)
     contact = f"@{state.settings.support_username}" if state.settings.support_username else "مدیر ربات"
     await _show_screen(update,
         f"💬 پشتیبانی\nپیامت را همین‌جا بنویس.\nراه ارتباطی: {contact}",
-        reply_markup=ui.back_keyboard("menu:support" if update.callback_query else "menu:home"))
+        reply_markup=_flow_keyboard(
+            flow, include_back=bool(update.callback_query)
+        ))
 
 
 async def _send_support_request(update: Update, context: ContextTypes.DEFAULT_TYPE, detail: str) -> None:
@@ -1108,11 +1361,15 @@ async def _send_support_request(update: Update, context: ContextTypes.DEFAULT_TY
             chat_id=state.settings.provider_control_user_id,
             text=f"💬 تیکت {ticket_id}\nاز کاربر {user.id} (@{user.username or 'بدون نام کاربری'})\n{detail}",
         )
-        state.awaiting_support.discard(user.id)
+        _clear_user_input(state, user.id)
         await message.reply_text(f"✅ پیامت برای پشتیبانی ارسال شد.\nشناسهٔ پیگیری: {ticket_id}", reply_markup=ui.back_keyboard())
     except TelegramError:
         logger.exception("Could not forward support ticket %s", ticket_id)
-        await message.reply_text("ارسال پیام ممکن نشد. کمی بعد دوباره تلاش کن.")
+        flow = state.user_flows.get(user.id)
+        await message.reply_text(
+            "ارسال پیام ممکن نشد. کمی بعد دوباره تلاش کن.",
+            reply_markup=_flow_keyboard(flow) if flow else None,
+        )
 
 
 
@@ -1127,6 +1384,7 @@ async def admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     if user.id != state.settings.provider_control_user_id:
         await message.reply_text("این پنل فقط برای مدیر ربات است.")
         return
+    _clear_user_input(state, user.id)
     await _show_admin_panel(message.reply_text, state, user.id)
 
 
@@ -1368,6 +1626,7 @@ async def admin_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     if user.id != state.settings.provider_control_user_id:
         await query.answer("فقط مدیر دسترسی دارد.", show_alert=True)
         return
+    _clear_user_input(state, user.id)
     action = (query.data or "").split(":")
     if len(action) > 1 and action[1] in {"images", "imagemodel", "imageprice", "imageeditprice", "contentprices", "contentprice"}:
         await query.answer("این سرویس دیگر فعال نیست.", show_alert=True)
@@ -1382,7 +1641,7 @@ async def admin_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         return
     if len(action) == 3 and action[1] == "setting" and action[2] in ADMIN_SETTING_FIELDS:
         name = action[2]
-        state.admin_editing[user.id] = f"config_{name}"
+        flow = _begin_admin_input(state, user.id, f"config_{name}")
         await query.answer()
         secret = name in {"openai_api_key", "openai_admin_key", "openrouter_api_key"}
         if secret:
@@ -1391,11 +1650,14 @@ async def admin_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             help_text = (
                 "دامنهٔ عمومی مثل files.example.com را بفرست. ربات Caddy را می‌سازد و HTTPS را تنظیم می‌کند؛ "
                 "رکورد DNS باید به IP این سرور برسد و پورت‌های ۸۰ و ۴۴۳ از بیرون باز باشند. "
-                "برای حذف دامنه «پاک» بفرست. لغو: /cancel"
+                "برای حذف دامنه «پاک» بفرست."
             )
         else:
-            help_text = "مقدار جدید را بفرست؛ برای حذف مقدار اختیاری «پاک» بفرست. لغو: /cancel"
-        await _edit_query_screen(query, f"تنظیم {ADMIN_SETTING_LABELS[name]}\n{help_text}")
+            help_text = "مقدار جدید را بفرست؛ برای حذف مقدار اختیاری «پاک» بفرست."
+        await _edit_query_screen(
+            query, f"تنظیم {ADMIN_SETTING_LABELS[name]}\n{help_text}",
+            reply_markup=_flow_keyboard(flow, include_back=False),
+        )
         return
     if action == ["admin", "backup"]:
         interval = int(await state.database.get_setting("auto_backup_interval_hours", "0"))
@@ -1414,10 +1676,11 @@ async def admin_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         )
         return
     if action == ["admin", "backup", "interval"]:
-        state.admin_editing[user.id] = "backup_interval"
+        flow = _begin_admin_input(state, user.id, "backup_interval")
         await query.answer()
         await _edit_query_screen(query,
-            "فاصلهٔ بکاپ را برحسب ساعت بفرست (۱ تا ۷۲۰). عدد ۰ بکاپ خودکار را خاموش می‌کند. نمونه: ۲۴\nلغو: /cancel")
+            "فاصلهٔ بکاپ را برحسب ساعت بفرست (۱ تا ۷۲۰). عدد ۰ بکاپ خودکار را خاموش می‌کند. نمونه: ۲۴",
+            reply_markup=_flow_keyboard(flow, include_back=False))
         return
     if action == ["admin", "backup", "now"]:
         await query.answer("در حال ساخت و ارسال بکاپ…")
@@ -1447,12 +1710,13 @@ async def admin_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         current = _bounded_percent(
             await state.database.get_setting("dub_original_audio_percent", "10")
         )
-        state.admin_editing[user.id] = "dub_original_audio_percent"
+        flow = _begin_admin_input(state, user.id, "dub_original_audio_percent")
         await query.answer()
         await _edit_query_screen(
             query,
             f"🔊 صدای اصلی در دوبله اکنون {current}% است.\n"
-            "درصد دلخواه را از ۰ تا ۱۰۰ بفرست؛ مقدار پیش‌فرض ۱۰٪ است.\nلغو: /cancel",
+            "درصد دلخواه را از ۰ تا ۱۰۰ بفرست؛ مقدار پیش‌فرض ۱۰٪ است.",
+            reply_markup=_flow_keyboard(flow, include_back=False),
         )
         return
     if len(action) == 3 and action[1] == "imagemodel":
@@ -1465,14 +1729,14 @@ async def admin_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         await _edit_query_screen(query, f"✅ مدل تصویر برای سفارش‌های بعدی: {option.model}", reply_markup=InlineKeyboardMarkup([[ui.button("‹ تنظیم تصویر", "admin:images")]]))
         return
     if action == ["admin", "imageprice"]:
-        state.admin_editing[user.id] = "image_price"
+        flow = _begin_admin_input(state, user.id, "image_price")
         await query.answer()
-        await _edit_query_screen(query, "قیمت فروش هر تصویر را به تومان بفرست؛ صفر سرویس را غیرفعال می‌کند. لغو: /cancel")
+        await _edit_query_screen(query, "قیمت فروش هر تصویر را به تومان بفرست؛ صفر سرویس را غیرفعال می‌کند.", reply_markup=_flow_keyboard(flow, include_back=False))
         return
     if action == ["admin", "imageeditprice"]:
-        state.admin_editing[user.id] = "image_edit_price"
+        flow = _begin_admin_input(state, user.id, "image_edit_price")
         await query.answer()
-        await _edit_query_screen(query, "قیمت ویرایش هر تصویر را به تومان بفرست؛ صفر ویرایش را غیرفعال می‌کند. لغو: /cancel")
+        await _edit_query_screen(query, "قیمت ویرایش هر تصویر را به تومان بفرست؛ صفر ویرایش را غیرفعال می‌کند.", reply_markup=_flow_keyboard(flow, include_back=False))
         return
     if action == ["admin", "packages"]:
         await query.answer()
@@ -1483,9 +1747,9 @@ async def admin_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             ]))
         return
     if len(action) == 3 and action[1] == "package" and action[2] in {"subtitle", "dub"}:
-        state.admin_editing[user.id] = f"package_{action[2]}"
+        flow = _begin_admin_input(state, user.id, f"package_{action[2]}")
         await query.answer()
-        await _edit_query_screen(query, "سه عدد دقیقه، قیمت تومان و روز اعتبار را با فاصله بفرست؛ نمونه: 100 400000 30\nبرای غیرفعال‌سازی عدد 0 و برای لغو /cancel را بزن.")
+        await _edit_query_screen(query, "سه عدد دقیقه، قیمت تومان و روز اعتبار را با فاصله بفرست؛ نمونه: 100 400000 30\nبرای غیرفعال‌سازی عدد 0.", reply_markup=_flow_keyboard(flow, include_back=False))
         return
     if action == ["admin", "contentprices"]:
         summary = await state.database.get_setting("content_price_summary", "0")
@@ -1500,9 +1764,9 @@ async def admin_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             ]))
         return
     if len(action) == 3 and action[1] == "contentprice" and action[2] in {"summary", "social"}:
-        state.admin_editing[user.id] = f"content_{action[2]}"
+        flow = _begin_admin_input(state, user.id, f"content_{action[2]}")
         await query.answer()
-        await _edit_query_screen(query, "قیمت ثابت هر سفارش را به تومان بفرست؛ عدد ۰ سرویس را غیرفعال می‌کند. لغو: /cancel")
+        await _edit_query_screen(query, "قیمت ثابت هر سفارش را به تومان بفرست؛ عدد ۰ سرویس را غیرفعال می‌کند.", reply_markup=_flow_keyboard(flow, include_back=False))
         return
     if action == ["admin", "models"]:
         await query.answer()
@@ -1544,19 +1808,19 @@ async def admin_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             await _show_admin_panel(query.message.reply_text, state, user.id)
         return
     if len(action) == 3 and action[1] == "edit" and action[2] in {"subtitle", "dub"}:
-        state.admin_editing[user.id] = action[2]
+        flow = _begin_admin_input(state, user.id, action[2])
         await query.answer()
-        await _edit_query_screen(query, "نرخ جدید را به تومان برای هر دقیقه بفرست. لغو: /cancel")
+        await _edit_query_screen(query, "نرخ جدید را به تومان برای هر دقیقه بفرست.", reply_markup=_flow_keyboard(flow, include_back=False))
         return
     if action == ["admin", "wallet", "credit"] or action == ["admin", "wallet", "debit"]:
-        state.admin_editing[user.id] = action[2]
+        flow = _begin_admin_input(state, user.id, action[2])
         await query.answer()
-        await _edit_query_screen(query, "شناسهٔ عددی تلگرام و مبلغ تومان را بفرست؛ نمونه: 123456789 500000\nلغو: /cancel")
+        await _edit_query_screen(query, "شناسهٔ عددی تلگرام و مبلغ تومان را بفرست؛ نمونه: 123456789 500000", reply_markup=_flow_keyboard(flow, include_back=False))
         return
     if action == ["admin", "wallet", "lookup"]:
-        state.admin_editing[user.id] = "lookup"
+        flow = _begin_admin_input(state, user.id, "lookup")
         await query.answer()
-        await _edit_query_screen(query, "شناسهٔ عددی تلگرام کاربر را بفرست؛ لغو: /cancel")
+        await _edit_query_screen(query, "شناسهٔ عددی تلگرام کاربر را بفرست.", reply_markup=_flow_keyboard(flow, include_back=False))
         return
     if action == ["admin", "providers"]:
         await query.answer()
@@ -1596,7 +1860,8 @@ async def _save_admin_value(update: Update, state: BotState, application: Applic
     if message.chat.type != "private":
         await message.reply_text("برای امنیت، تنظیمات مدیر را فقط در گفت‌وگوی خصوصی ربات بفرست.")
         return
-    key = state.admin_editing.get(user.id)
+    flow = state.user_flows.get(user.id)
+    key = flow.payload if flow and flow.stage == "admin_value" else state.admin_editing.get(user.id)
     if not key:
         return
     if key == "backup_interval":
@@ -1611,7 +1876,7 @@ async def _save_admin_value(update: Update, state: BotState, application: Applic
         await state.database.set_setting("auto_backup_interval_hours", str(interval))
         next_at = datetime.now(UTC) + timedelta(hours=interval) if interval else None
         await state.database.set_setting("auto_backup_next_at", next_at.isoformat() if next_at else "")
-        state.admin_editing.pop(user.id, None)
+        _clear_user_input(state, user.id)
         await _return_to_admin_panel(
             message.reply_text,
             state,
@@ -1642,7 +1907,7 @@ async def _save_admin_value(update: Update, state: BotState, application: Applic
         })
         state.settings = replace(state.settings, download_domain=domain, download_base_url=base_url)
         application.bot_data["settings"] = state.settings
-        state.admin_editing.pop(user.id, None)
+        _clear_user_input(state, user.id)
         if domain:
             status = "کانتینر Caddy از قبل فعال بود." if result.get("already_running") else "کانتینر Caddy ساخته و اجرا شد."
             confirmation = (
@@ -1673,7 +1938,7 @@ async def _save_admin_value(update: Update, state: BotState, application: Applic
             os.environ["FFMPEG_THREADS"] = str(value)
         elif name == "ffmpeg_preset":
             os.environ["FFMPEG_PRESET"] = str(value)
-        state.admin_editing.pop(user.id, None)
+        _clear_user_input(state, user.id)
         confirmation = f"✅ تنظیم «{ADMIN_SETTING_LABELS.get(name, name)}» ذخیره شد."
         if name in {"openai_api_key", "openai_admin_key", "openrouter_api_key"}:
             try:
@@ -1700,7 +1965,7 @@ async def _save_admin_value(update: Update, state: BotState, application: Applic
             await message.reply_text("سه عدد معتبر دقیقه، قیمت تومان و روز اعتبار یا عدد 0 بفرست.")
             return
         await state.database.set_setting(f"plan_{key.removeprefix('package_')}", value)
-        state.admin_editing.pop(user.id, None)
+        _clear_user_input(state, user.id)
         await _return_to_admin_panel(
             message.reply_text,
             state,
@@ -1720,7 +1985,7 @@ async def _save_admin_value(update: Update, state: BotState, application: Applic
         if not summary:
             await message.reply_text("کاربری با این شناسه در دیتابیس نیست.")
             return
-        state.admin_editing.pop(user.id, None)
+        _clear_user_input(state, user.id)
         lines = [
             f"👤 کاربر {summary['telegram_id']} (@{summary['username'] or 'بدون نام کاربری'})",
             f"موجودی: {summary['wallet_balance_toman']:,} تومان · شارژهای ثبت‌شده: {summary['total_deposited_toman']:,} تومان",
@@ -1748,7 +2013,7 @@ async def _save_admin_value(update: Update, state: BotState, application: Applic
             await message.reply_text("یک عدد صحیح بین ۰ تا ۱۰۰ بفرست؛ نمونه: 10")
             return
         await state.database.set_setting(key, str(percent))
-        state.admin_editing.pop(user.id, None)
+        _clear_user_input(state, user.id)
         await _return_to_admin_panel(
             message.reply_text,
             state,
@@ -1772,7 +2037,7 @@ async def _save_admin_value(update: Update, state: BotState, application: Applic
         if new_balance is None:
             await message.reply_text("موجودی برای این کسر کافی نیست یا اطلاعات کاربر معتبر نیست.")
             return
-        state.admin_editing.pop(user.id, None)
+        _clear_user_input(state, user.id)
         action_label = "شارژ شد" if key == "credit" else "کسر شد"
         await _return_to_admin_panel(
             message.reply_text,
@@ -1793,7 +2058,7 @@ async def _save_admin_value(update: Update, state: BotState, application: Applic
     except ValueError:
         await message.reply_text("یک عدد صحیح تومان بین ۱ تا ۱٬۰۰۰٬۰۰۰٬۰۰۰ بفرست.")
         return
-    state.admin_editing.pop(user.id, None)
+    _clear_user_input(state, user.id)
     if key in {"image_price", "image_edit_price"}:
         await state.database.set_setting(key, str(price))
         await _return_to_admin_panel(
@@ -1845,16 +2110,13 @@ async def menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     await query.answer()
     state = _state(context)
     pending_video = context.application.bot_data.get("video_captions_pending", {})
-    if not pending_video.get(user.id, {}).get("confirming"):
-        pending_video.pop(user.id, None)
-    state.awaiting_image_prompt.discard(user.id)
-    state.image_references.pop(user.id, None)
-    state.subtitle_editing.pop(user.id, None)
-    if not state.image_quotes.get(str(user.id), {}).get("confirming"):
-        state.image_quotes.pop(str(user.id), None)
-    if action != "contact":
-        state.awaiting_support.discard(user.id)
-    state.awaiting_topup.discard(user.id)
+    if action != "status":
+        if not pending_video.get(user.id, {}).get("confirming"):
+            pending_video.pop(user.id, None)
+        _clear_user_input(state, user.id)
+        state.image_references.pop(user.id, None)
+        if not state.image_quotes.get(str(user.id), {}).get("confirming"):
+            state.image_quotes.pop(str(user.id), None)
     if action == "home":
         state.subtitle_editing.pop(user.id, None)
         await state.database.upsert_user(user, True)
@@ -1868,14 +2130,46 @@ async def menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
                     [ui.button("‹ بازگشت", "menu:home")],
                 ]))
             return
+        flow = _begin_user_flow(state, user.id, "new_order_link", back_action="menu:home")
         await _edit_query_screen(query, "🎬 سفارش جدید\nلینک ویدیوی یوتیوب را همین‌جا بفرست.",
-                                      reply_markup=ui.back_keyboard())
+                                      reply_markup=_flow_keyboard(flow))
     elif action == "services":
         await _edit_query_screen(query, "✨ خدمات\nیکی از گزینه‌ها را انتخاب کن:", reply_markup=ui.services_keyboard())
     elif action == "pricing":
         await pricing(update, context)
     elif action == "status":
-        if user.id in state.active:
+        if user.id in state.user_flows:
+            flow = state.user_flows[user.id]
+            current_stage = state.current_stage(user.id)
+            stage_label = {
+                "admin_value": "دریافت مقدار تنظیم مدیر",
+                "topup_amount": "دریافت مبلغ شارژ",
+                "support_message": "دریافت پیام پشتیبانی",
+                "subtitle_edit": "دریافت اصلاح زیرنویس",
+                "image_prompt": "دریافت توضیح تصویر",
+                "new_order_link": "دریافت لینک ویدیو",
+                "video_upload": "دریافت ویدیو",
+                "video_options": "انتخاب نوع پردازش ویدیو",
+                "video_language": "انتخاب زبان ویدیو",
+                "video_color": "انتخاب رنگ زیرنویس",
+                "video_font": "انتخاب فونت زیرنویس",
+                "video_font_size": "انتخاب اندازهٔ فونت",
+                "video_payment": "تأیید و پرداخت زیرنویس ویدیو",
+                "video_confirming": "ثبت سفارش زیرنویس ویدیو",
+            }.get(current_stage, current_stage)
+            if flow.stage == "video_confirming":
+                flow_keyboard = ui.back_keyboard("menu:services")
+            elif flow.stage.startswith("video_"):
+                flow_keyboard = ui.cancel_keyboard(
+                    f"vclip:cancel:{flow.token}", "menu:services"
+                )
+            else:
+                flow_keyboard = _flow_keyboard(flow)
+            await _edit_query_screen(
+                query, f"مرحلهٔ فعلی: {stage_label}",
+                reply_markup=flow_keyboard,
+            )
+        elif user.id in state.active:
             job = state.active[user.id]
             label = ("زیرنویس ویدیوی ارسالی" if isinstance(job, VideoCaptionJob) else "دانلود" if isinstance(job, DownloadJob) else "ساخت تصویر" if isinstance(job, ImageJob) else "محتوای تکمیلی" if isinstance(job, ContentJob) else
                      "زیرنویس" if job.mode == "subtitle" else "دوبله")
@@ -1887,16 +2181,44 @@ async def menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
                 reply_markup=ui.job_keyboard(job.id, cancellable=not isinstance(job, (Job, ImageJob, VideoCaptionJob)) or not job.delivery_started))
         elif user.id in state.pending_by_user:
             token = state.pending_by_user[user.id]
-            await _edit_query_screen(query, "📦 سفارش هنوز در مرحلهٔ انتخاب است. آن را ادامه بده یا لغو کن.",
+            current_stage = state.current_stage(user.id)
+            stage_label = {
+                "mode": "انتخاب نوع خروجی",
+                "dub_mode": "انتخاب روش دوبله",
+                "checking_dub_mode": "بررسی روش دوبله",
+                "probing": "بررسی ویدیو",
+                "quality": "انتخاب کیفیت",
+                "pricing": "محاسبهٔ هزینه",
+                "payment": "تأیید و پرداخت",
+                "confirming": "ثبت سفارش",
+            }.get(current_stage, "انتخاب سفارش")
+            await _edit_query_screen(query, f"📦 سفارش در مرحلهٔ «{stage_label}» است. آن را ادامه بده یا لغو کن.",
                 reply_markup=InlineKeyboardMarkup([
                     [ui.button("✕ لغو انتخاب", f"order_cancel:{token}", style="danger")],
                     [ui.button("‹ بازگشت", "menu:home")],
                 ]))
+        elif pending_video.get(user.id, {}).get("stage") == "video":
+            video_flow = pending_video[user.id]
+            await _edit_query_screen(
+                query, "مرحلهٔ فعلی: دریافت ویدیوی زیرنویس‌شونده",
+                reply_markup=ui.cancel_keyboard(
+                    f"vclip:cancel:{video_flow['token']}", "menu:services"
+                ),
+            )
         else:
-            await _edit_query_screen(query, "📦 سفارش فعالی نداری.", reply_markup=InlineKeyboardMarkup([
-                [ui.button("🎬 سفارش جدید", "menu:new", style="primary")],
-                [ui.button("‹ بازگشت", "menu:home")],
-            ]))
+            pending_deposit = await state.database.get_user_pending_deposit(user.id)
+            if pending_deposit and pending_deposit["status"] == "awaiting_proof":
+                await _edit_query_screen(
+                    query, "مرحلهٔ فعلی: دریافت رسید شارژ",
+                    reply_markup=ui.cancel_keyboard(
+                        f"deposit:cancel:{pending_deposit['id']}", "wallet:balance"
+                    ),
+                )
+            else:
+                await _edit_query_screen(query, "📦 سفارش فعالی نداری.", reply_markup=InlineKeyboardMarkup([
+                    [ui.button("🎬 سفارش جدید", "menu:new", style="primary")],
+                    [ui.button("‹ بازگشت", "menu:home")],
+                ]))
     elif action == "canceljob":
         await _edit_query_screen(query, "برای لغو، وضعیت سفارش را باز کن.",
             reply_markup=InlineKeyboardMarkup([
@@ -1932,7 +2254,11 @@ async def receive_deposit_proof(update: Update, context: ContextTypes.DEFAULT_TY
     if message.chat.type != "private":
         await message.reply_text("رسید را فقط در گفت‌وگوی خصوصی ربات بفرست.")
         return
-    pending = await _state(context).database.get_user_pending_deposit(user.id)
+    state = _state(context)
+    flow = state.user_flows.get(user.id)
+    if flow and flow.stage != "deposit_proof":
+        return
+    pending = await state.database.get_user_pending_deposit(user.id)
     if not pending or pending["status"] != "awaiting_proof":
         await message.reply_text("برای ارسال رسید، ابتدا از بخش کیف پول درخواست شارژ بساز.", reply_markup=ui.wallet_keyboard())
         return
@@ -1983,13 +2309,23 @@ async def deposit_action(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     if not query or not user:
         return
     state = _state(context)
-    if user.id != state.settings.provider_control_user_id:
-        await query.answer("فقط مدیر می‌تواند رسید را بررسی کند.", show_alert=True)
-        return
     try:
         _, action, request_id = (query.data or "").split(":", 2)
     except ValueError:
         await query.answer("درخواست نامعتبر است.", show_alert=True)
+        return
+    if action == "cancel":
+        cancelled = await state.database.cancel_deposit_request(request_id, user.id)
+        if not cancelled:
+            await query.answer("این درخواست دیگر قابل لغو نیست.", show_alert=True)
+            return
+        await query.answer("درخواست شارژ لغو شد.")
+        await _edit_query_screen(
+            query, "درخواست شارژ لغو شد.", reply_markup=ui.wallet_keyboard()
+        )
+        return
+    if user.id != state.settings.provider_control_user_id:
+        await query.answer("فقط مدیر می‌تواند رسید را بررسی کند.", show_alert=True)
         return
     if action == "approve":
         result = await state.database.approve_deposit(request_id, user.id)
@@ -2037,8 +2373,7 @@ async def wallet_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     await query.answer()
     action = (query.data or "").partition(":")[2]
     if action == "balance":
-        _state(context).awaiting_support.discard(user.id)
-        _state(context).awaiting_topup.discard(user.id)
+        _clear_user_input(_state(context), user.id)
         await balance(update, context)
     elif action == "topup":
         await _prompt_topup(update, context)
@@ -2269,6 +2604,7 @@ async def orders_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     if not query or not user or not query.message or query.message.chat.type != "private":
         return
     state = _state(context)
+    _clear_user_input(state, user.id)
     parts = (query.data or "").split(":")
     action = parts[1] if len(parts) > 1 else ""
     if action == "home":
@@ -2369,6 +2705,7 @@ async def packages_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     if not query or not user or not query.message or query.message.chat.type != "private":
         return
     state = _state(context)
+    _clear_user_input(state, user.id)
     parts = (query.data or "").split(":")
     action = parts[1] if len(parts) > 1 else ""
     if action == "list":
@@ -2591,7 +2928,7 @@ async def _receive_image_prompt(update: Update, context: ContextTypes.DEFAULT_TY
     price_key = "image_edit_price" if user.id in state.image_references else "image_price"
     price = int(await state.database.get_setting(price_key, "0"))
     if price <= 0:
-        state.awaiting_image_prompt.discard(user.id)
+        _clear_user_input(state, user.id)
         state.image_references.pop(user.id, None)
         await message.reply_text("این نوع سرویس تصویر فعلاً فعال نیست.", reply_markup=ui.back_keyboard())
         return
@@ -2601,7 +2938,7 @@ async def _receive_image_prompt(update: Update, context: ContextTypes.DEFAULT_TY
     reference = state.image_references.pop(user.id, None)
     state.image_quotes[str(user.id)] = {"token": token, "prompt": prompt, "price": price,
                                         "model": model, "optimizer": optimizer, "aspect": "1:1", "reference": reference}
-    state.awaiting_image_prompt.discard(user.id)
+    _clear_user_input(state, user.id)
     await message.reply_text(_image_quote_text(state.image_quotes[str(user.id)]), reply_markup=_image_quote_keyboard(token, "1:1"))
 
 
@@ -2654,10 +2991,13 @@ async def image_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         state.subtitle_editing.pop(user.id, None)
         state.image_quotes.pop(str(user.id), None)
         state.image_references.pop(user.id, None)
+        flow = _begin_user_flow(
+            state, user.id, "image_prompt", back_action="menu:services"
+        )
         state.awaiting_image_prompt.add(user.id)
         await query.answer()
         await _edit_query_screen(query, "🎨 ساخت تصویر\nمتن تصویر را بفرست. برای ویرایش، عکس را بفرست و بعد تغییر موردنظر را بنویس.\nقیمت را پیش از تأیید می‌بینی.",
-                                      reply_markup=ui.back_keyboard("menu:services"))
+                                      reply_markup=_flow_keyboard(flow))
         return
     if action == "history":
         state.awaiting_image_prompt.discard(user.id)
@@ -2698,10 +3038,13 @@ async def image_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         state.subtitle_editing.pop(user.id, None)
         state.image_quotes.pop(str(user.id), None)
         state.image_references[user.id] = (saved["image"], saved["media_type"])
+        flow = _begin_user_flow(
+            state, user.id, "image_prompt", back_action="orders:home"
+        )
         state.awaiting_image_prompt.add(user.id)
         await query.answer()
         await _edit_query_screen(query, "🖌 تغییر موردنظرت را بنویس. قیمت را پیش از تأیید می‌بینی.",
-                                      reply_markup=ui.back_keyboard("orders:home"))
+                                      reply_markup=_flow_keyboard(flow))
         return
     if action == "get" and len(parts) == 3:
         saved = await state.database.owned_image(user.id, parts[2])
@@ -2726,9 +3069,12 @@ async def image_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         state.image_quotes.pop(str(user.id), None)
         if reference:
             state.image_references[user.id] = reference
+        flow = _begin_user_flow(
+            state, user.id, "image_prompt", back_action="menu:services"
+        )
         state.awaiting_image_prompt.add(user.id)
         await query.answer()
-        await _edit_query_screen(query, "✏️ توضیح جدید را بفرست.", reply_markup=ui.back_keyboard("menu:services"))
+        await _edit_query_screen(query, "✏️ توضیح جدید را بفرست.", reply_markup=_flow_keyboard(flow))
         return
     if action == "aspect" and len(parts) == 5 and ":".join(parts[3:]) in {"1:1", "2:3", "3:2"}:
         quote["aspect"] = ":".join(parts[3:])
@@ -2838,7 +3184,7 @@ async def content_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         await _edit_query_screen(query, "📝 سفارش را انتخاب کن:", reply_markup=InlineKeyboardMarkup(buttons))
         return
     if action == "job" and len(parts) == 3:
-        state.subtitle_editing.pop(user.id, None)
+        _clear_user_input(state, user.id)
         job_id = parts[2]
         if not await state.database.owned_subtitle(job_id, user.id):
             await query.answer("سفارش پیدا نشد.", show_alert=True)
@@ -2875,14 +3221,18 @@ async def content_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         if not subtitle:
             await query.answer("سفارش پیدا نشد.", show_alert=True)
             return
+        flow = _begin_user_flow(
+            state, user.id, "subtitle_edit", back_action=f"content:job:{job_id}",
+            payload=job_id,
+        )
         state.subtitle_editing[user.id] = job_id
         data = BytesIO(subtitle.encode("utf-8")); data.name = "fa.srt"
         await query.answer()
         await query.message.reply_document(data,
             caption="فایل فعلی را ببین و اصلاح را با شمارهٔ بخش و متن جدید بفرست. نمونه: 12 متن اصلاح‌شده",
-            reply_markup=InlineKeyboardMarkup([[ui.button("‹ بازگشت", f"content:job:{job_id}")]]))
+            reply_markup=ui.cancel_keyboard(f"flow_cancel:{flow.token}", f"content:job:{job_id}"))
         await _edit_query_screen(query, "📎 فایل زیرنویس ارسال شد. شمارهٔ بخش و متن جدید را بفرست.",
-                                 reply_markup=ui.back_keyboard(f"content:job:{job_id}"))
+                                 reply_markup=_flow_keyboard(flow))
         return
     if action == "quote" and len(parts) == 4 and parts[2] in {"summary", "social"}:
         kind, job_id = parts[2], parts[3]
@@ -2945,22 +3295,27 @@ async def _receive_subtitle_edit(update: Update, context: ContextTypes.DEFAULT_T
     if not user or not message or message.chat.type != "private":
         return
     state = _state(context)
-    job_id = state.subtitle_editing.get(user.id)
+    flow = state.user_flows.get(user.id)
+    job_id = flow.payload if flow and flow.stage == "subtitle_edit" else state.subtitle_editing.get(user.id)
     old = await state.database.owned_subtitle(job_id, user.id)
     if not old:
-        state.subtitle_editing.pop(user.id, None)
+        _clear_user_input(state, user.id)
         await message.reply_text("سفارش پیدا نشد.")
         return
     try:
         raw_number, replacement = message.text.strip().split(maxsplit=1)
         changed = edit_subtitle_line(old, int(raw_number), replacement)
     except ValueError as exc:
-        await message.reply_text(f"ورودی معتبر نیست: {exc}\nنمونه: 12 متن اصلاح‌شده")
+        flow = state.user_flows.get(user.id)
+        await message.reply_text(
+            f"ورودی معتبر نیست: {exc}\nنمونه: 12 متن اصلاح‌شده",
+            reply_markup=_flow_keyboard(flow) if flow else None,
+        )
         return
     if not await state.database.replace_subtitle(job_id, user.id, old, changed):
         await message.reply_text("زیرنویس هم‌زمان تغییر کرد؛ دوباره تلاش کن.")
         return
-    state.subtitle_editing.pop(user.id, None)
+    _clear_user_input(state, user.id)
     data = BytesIO(changed.encode("utf-8")); data.name = "fa-edited.srt"
     await message.reply_document(data, caption="✅ فایل SRT اصلاح شد. ویدیوی قبلی و زیرنویس پلیر قبلی خودکار تغییر نمی‌کنند.")
 
@@ -3573,6 +3928,9 @@ async def post_init(application: Application) -> None:
     download_dir.mkdir(parents=True, exist_ok=True)
     await asyncio.to_thread(cleanup_expired_downloads, download_dir, settings.download_ttl_hours)
     state = BotState(settings, database)
+    state.video_captions_pending = application.bot_data.setdefault(
+        "video_captions_pending", {}
+    )
     for order in await database.unfinished_content_orders():
         try:
             if await database.refund_content_order(order["id"]):
@@ -3632,7 +3990,6 @@ async def post_init(application: Application) -> None:
         BotCommand("charge", "درخواست شارژ کارت‌به‌کارت"),
         BotCommand("terms", "شرایط استفاده"),
         BotCommand("paysupport", "پشتیبانی پرداخت"),
-        BotCommand("cancel", "لغو درخواست یا شارژ"),
     ])
     application.bot_data["worker_task"] = asyncio.create_task(worker(application), name="video-worker")
     application.bot_data["backup_task"] = asyncio.create_task(
@@ -3679,7 +4036,6 @@ def main() -> None:
     application.add_handler(CommandHandler("terms", terms))
     application.add_handler(CommandHandler("paysupport", payment_support))
     application.add_handler(CommandHandler("admin", admin_panel))
-    application.add_handler(CommandHandler("cancel", cancel))
     application.add_handler(CommandHandler("limits", limits))
     application.add_handler(CommandHandler("provider", choose_provider_command))
     application.add_handler(CallbackQueryHandler(choose_provider_callback, pattern=r"^provider:"))
@@ -3695,6 +4051,7 @@ def main() -> None:
     application.add_handler(CallbackQueryHandler(choose_quality, pattern=r"^quality:"))
     application.add_handler(CallbackQueryHandler(confirm_order, pattern=r"^confirm:"))
     application.add_handler(CallbackQueryHandler(cancel_order_callback, pattern=r"^order_cancel:"))
+    application.add_handler(CallbackQueryHandler(flow_cancel_callback, pattern=r"^flow_cancel:"))
     application.add_handler(CallbackQueryHandler(back_to_mode, pattern=r"^order_back:"))
     application.add_handler(CallbackQueryHandler(back_to_quality, pattern=r"^order_quality_back:"))
     application.add_handler(CallbackQueryHandler(deposit_action, pattern=r"^deposit:"))

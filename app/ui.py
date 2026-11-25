@@ -91,6 +91,13 @@ def back_keyboard(action: str = 'menu:home') -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([[button('‹ بازگشت', action)]])
 
 
+def cancel_keyboard(cancel_action: str, back_action: str | None = None) -> InlineKeyboardMarkup:
+    rows = [[button('✕ لغو', cancel_action, style='danger')]]
+    if back_action:
+        rows.append([button('‹ بازگشت', back_action)])
+    return InlineKeyboardMarkup(rows)
+
+
 def job_keyboard(job_id: str, *, cancellable: bool = True) -> InlineKeyboardMarkup:
     rows = []
     if cancellable:
