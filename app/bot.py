@@ -781,7 +781,9 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await message.reply_text("انتخاب تصویر لغو شد.", reply_markup=ui.back_keyboard())
         return
     if state.admin_editing.pop(user.id, None):
-        await message.reply_text("تغییر تنظیمات لغو شد.")
+        await _return_to_admin_panel(
+            message.reply_text, state, user.id, "تغییر تنظیمات لغو شد."
+        )
         return
     pending_token = state.pending_by_user.get(user.id)
     if pending_token:
@@ -1173,6 +1175,13 @@ async def _show_admin_panel(send, state: BotState, user_id: int) -> None:
     )
 
 
+async def _return_to_admin_panel(send, state: BotState, user_id: int, confirmation: str = "") -> None:
+    """Show an operation result followed by a fresh admin panel."""
+    if confirmation:
+        await send(confirmation)
+    await _show_admin_panel(send, state, user_id)
+
+
 async def _show_admin_config(query, state: BotState) -> None:
     buttons = [[ui.button(title, f"admin:settings:{name}")]
                for name, (title, _) in ADMIN_SETTING_CATEGORIES.items()]
@@ -1416,7 +1425,12 @@ async def admin_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             await _send_database_backup(context.application, state)
         except Exception as exc:
             logger.exception("Manual database backup failed")
-            await query.message.reply_text(f"❌ ساخت یا ارسال بکاپ ناموفق بود: {str(exc)[:500]}")
+            result_text = f"❌ ساخت یا ارسال بکاپ ناموفق بود: {str(exc)[:500]}"
+        else:
+            result_text = "✅ بکاپ برای مدیر ارسال شد."
+        await _edit_query_screen(query, result_text)
+        if query.message:
+            await _show_admin_panel(query.message.reply_text, state, user.id)
         return
     if action == ["admin", "images"]:
         await query.answer()
@@ -1509,7 +1523,9 @@ async def admin_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             return
         await state.database.set_setting(f"model_choice_{option.provider}_{option.stage}", option.code)
         await query.answer("مدل ذخیره شد.")
-        await _show_model_options(query, state, option.stage)
+        await _edit_query_screen(query, f"✅ مدل «{option.model}» برای سفارش‌های بعدی ذخیره شد.")
+        if query.message:
+            await _show_admin_panel(query.message.reply_text, state, user.id)
         return
     if action == ["admin", "voices"]:
         await query.answer()
@@ -1523,7 +1539,9 @@ async def admin_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             return
         await state.database.set_setting(f"model_voice_{provider}", voice)
         await query.answer("صدا ذخیره شد.")
-        await _show_voice_options(query, state)
+        await _edit_query_screen(query, f"✅ صدای {voice} برای سفارش‌های بعدی ذخیره شد.")
+        if query.message:
+            await _show_admin_panel(query.message.reply_text, state, user.id)
         return
     if len(action) == 3 and action[1] == "edit" and action[2] in {"subtitle", "dub"}:
         state.admin_editing[user.id] = action[2]
@@ -1554,16 +1572,19 @@ async def admin_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         rows = await state.database.list_pending_deposits()
         await query.answer(f"{len(rows)} رسید در انتظار بررسی")
         if not rows:
-            await query.message.reply_text("رسید تأییدنشده‌ای وجود ندارد.")
+            await _edit_query_screen(query, "رسید تأییدنشده‌ای وجود ندارد.")
+            if query.message:
+                await _show_admin_panel(query.message.reply_text, state, user.id)
             return
         for row in rows:
             await _notify_admin_deposit(context.application, row, row.get("username"))
-        await query.message.reply_text("رسیدهای باز دوباره برای بررسی ارسال شدند.")
+        await _edit_query_screen(query, "رسیدهای باز دوباره برای بررسی ارسال شدند.")
+        if query.message:
+            await _show_admin_panel(query.message.reply_text, state, user.id)
         return
     if action == ["admin", "refresh"]:
         await query.answer()
-        await _edit_query_screen(query, "در حال به‌روزرسانی…")
-        await _show_admin_panel(query.message.reply_text, state, user.id)
+        await _show_admin_panel(query.edit_message_text, state, user.id)
         return
     await query.answer("دکمه منقضی شده است.", show_alert=True)
 
@@ -1591,8 +1612,13 @@ async def _save_admin_value(update: Update, state: BotState, application: Applic
         next_at = datetime.now(UTC) + timedelta(hours=interval) if interval else None
         await state.database.set_setting("auto_backup_next_at", next_at.isoformat() if next_at else "")
         state.admin_editing.pop(user.id, None)
-        await message.reply_text("✅ بکاپ خودکار خاموش شد." if not interval else
-                                 f"✅ بکاپ هر {interval} ساعت به گفت‌وگوی خصوصی مدیر ارسال می‌شود.")
+        await _return_to_admin_panel(
+            message.reply_text,
+            state,
+            user.id,
+            "✅ بکاپ خودکار خاموش شد." if not interval else
+            f"✅ بکاپ هر {interval} ساعت به گفت‌وگوی خصوصی مدیر ارسال می‌شود.",
+        )
         return
     if key == "config_download_domain":
         try:
@@ -1619,12 +1645,13 @@ async def _save_admin_value(update: Update, state: BotState, application: Applic
         state.admin_editing.pop(user.id, None)
         if domain:
             status = "کانتینر Caddy از قبل فعال بود." if result.get("already_running") else "کانتینر Caddy ساخته و اجرا شد."
-            await message.reply_text(
+            confirmation = (
                 f"✅ دامنهٔ دانلود روی https://{domain} تنظیم شد. {status}\n\n"
                 "مطمئن شو رکورد DNS دامنه به IP عمومی همین سرور اشاره می‌کند و پورت‌های ۸۰ و ۴۴۳ آزاد و باز هستند."
             )
         else:
-            await message.reply_text("✅ دامنهٔ HTTPS غیرفعال شد و کانتینر Caddy متوقف شد.")
+            confirmation = "✅ دامنهٔ HTTPS غیرفعال شد و کانتینر Caddy متوقف شد."
+        await _return_to_admin_panel(message.reply_text, state, user.id, confirmation)
         return
     if key.startswith("config_"):
         name = key.removeprefix("config_")
@@ -1650,14 +1677,14 @@ async def _save_admin_value(update: Update, state: BotState, application: Applic
         confirmation = f"✅ تنظیم «{ADMIN_SETTING_LABELS.get(name, name)}» ذخیره شد."
         if name in {"openai_api_key", "openai_admin_key", "openrouter_api_key"}:
             try:
-                await application.bot.send_message(chat_id=message.chat_id, text=confirmation)
+                await _return_to_admin_panel(message.reply_text, state, user.id, confirmation)
             finally:
                 try:
                     await message.delete()
                 except TelegramError:
                     logger.info("Could not delete API key message from admin chat")
         else:
-            await message.reply_text(confirmation)
+            await _return_to_admin_panel(message.reply_text, state, user.id, confirmation)
         return
     if key in {"package_subtitle", "package_dub"}:
         raw = message.text.strip().replace(",", "").replace("٬", "")
@@ -1674,7 +1701,12 @@ async def _save_admin_value(update: Update, state: BotState, application: Applic
             return
         await state.database.set_setting(f"plan_{key.removeprefix('package_')}", value)
         state.admin_editing.pop(user.id, None)
-        await message.reply_text("✅ تنظیم بسته ذخیره شد؛ بسته‌های خریداری‌شدهٔ قبلی تغییر نمی‌کنند.")
+        await _return_to_admin_panel(
+            message.reply_text,
+            state,
+            user.id,
+            "✅ تنظیم بسته ذخیره شد؛ بسته‌های خریداری‌شدهٔ قبلی تغییر نمی‌کنند.",
+        )
         return
     if key == "lookup":
         try:
@@ -1703,7 +1735,7 @@ async def _save_admin_value(update: Update, state: BotState, application: Applic
                 f"• {item['created_at']:%m-%d %H:%M} · {mode_names.get(item['mode'], item['mode'])} · "
                 f"{item['status']}{minutes} · {amount}"
             )
-        await message.reply_text("\n".join(lines))
+        await _return_to_admin_panel(message.reply_text, state, user.id, "\n".join(lines))
         return
     if key == "dub_original_audio_percent":
         digits = str.maketrans("۰۱۲۳۴۵۶۷۸۹٠١٢٣٤٥٦٧٨٩", "01234567890123456789")
@@ -1717,7 +1749,12 @@ async def _save_admin_value(update: Update, state: BotState, application: Applic
             return
         await state.database.set_setting(key, str(percent))
         state.admin_editing.pop(user.id, None)
-        await message.reply_text(f"✅ صدای اصلی برای دوبله‌های بعدی روی {percent}% تنظیم شد.")
+        await _return_to_admin_panel(
+            message.reply_text,
+            state,
+            user.id,
+            f"✅ صدای اصلی برای دوبله‌های بعدی روی {percent}% تنظیم شد.",
+        )
         return
     if key in {"credit", "debit"}:
         try:
@@ -1737,7 +1774,12 @@ async def _save_admin_value(update: Update, state: BotState, application: Applic
             return
         state.admin_editing.pop(user.id, None)
         action_label = "شارژ شد" if key == "credit" else "کسر شد"
-        await message.reply_text(f"✅ کیف پول {target_id} به مبلغ {amount:,} تومان {action_label}.\nموجودی جدید: {new_balance:,} تومان")
+        await _return_to_admin_panel(
+            message.reply_text,
+            state,
+            user.id,
+            f"✅ کیف پول {target_id} به مبلغ {amount:,} تومان {action_label}.\nموجودی جدید: {new_balance:,} تومان",
+        )
         if key == "credit":
             try:
                 await application.bot.send_message(target_id, f"💰 کیف پول شما توسط پشتیبانی {amount:,} تومان شارژ شد.\nموجودی: {new_balance:,} تومان")
@@ -1754,15 +1796,30 @@ async def _save_admin_value(update: Update, state: BotState, application: Applic
     state.admin_editing.pop(user.id, None)
     if key in {"image_price", "image_edit_price"}:
         await state.database.set_setting(key, str(price))
-        await message.reply_text(f"✅ قیمت {'ویرایش' if key == 'image_edit_price' else 'ساخت'} هر تصویر: {price:,} تومان؛ صفر سرویس را غیرفعال می‌کند.")
+        await _return_to_admin_panel(
+            message.reply_text,
+            state,
+            user.id,
+            f"✅ قیمت {'ویرایش' if key == 'image_edit_price' else 'ساخت'} هر تصویر: {price:,} تومان؛ صفر سرویس را غیرفعال می‌کند.",
+        )
         return
     if key in {"content_summary", "content_social"}:
         await state.database.set_setting(f"content_price_{key.removeprefix('content_')}", str(price))
-        await message.reply_text(f"✅ قیمت سرویس روی {price:,} تومان تنظیم شد؛ صفر به معنی غیرفعال است.")
+        await _return_to_admin_panel(
+            message.reply_text,
+            state,
+            user.id,
+            f"✅ قیمت سرویس روی {price:,} تومان تنظیم شد؛ صفر به معنی غیرفعال است.",
+        )
         return
     db_key = "price_subtitle_toman_per_minute" if key == "subtitle" else "price_dub_toman_per_minute"
     await state.database.set_setting(db_key, str(price))
-    await message.reply_text(f"✅ نرخ {('زیرنویس' if key == 'subtitle' else 'دوبله')} روی {price:,} تومان/دقیقه تنظیم شد.")
+    await _return_to_admin_panel(
+        message.reply_text,
+        state,
+        user.id,
+        f"✅ نرخ {('زیرنویس' if key == 'subtitle' else 'دوبله')} روی {price:,} تومان/دقیقه تنظیم شد.",
+    )
 
 
 async def terms_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -1951,6 +2008,8 @@ async def deposit_action(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             )
         except TelegramError:
             logger.exception("Could not notify user about approved deposit %s", request_id)
+        if query.message:
+            await _show_admin_panel(query.message.reply_text, state, user.id)
     elif action == "reject":
         result = await state.database.reject_deposit(request_id, user.id)
         if not result:
@@ -1965,6 +2024,8 @@ async def deposit_action(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             await context.application.bot.send_message(result["chat_id"], "درخواست شارژ تأیید نشد. اگر انتقال را انجام داده‌ای، با /paysupport شمارهٔ پیگیری را بفرست.")
         except TelegramError:
             logger.exception("Could not notify user about rejected deposit %s", request_id)
+        if query.message:
+            await _show_admin_panel(query.message.reply_text, state, user.id)
     else:
         await query.answer("عملیات نامعتبر است.", show_alert=True)
 
@@ -2044,6 +2105,8 @@ async def choose_provider_callback(update: Update, context: ContextTypes.DEFAULT
     await _edit_query_screen(query,
         f"سرویس برای jobهای بعدی روی {_provider_label(provider)} تنظیم شد."
     )
+    if query.message:
+        await _show_admin_panel(query.message.reply_text, state, user.id)
 
 
 def _provider_label(provider: str) -> str:
