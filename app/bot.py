@@ -1,10 +1,11 @@
 import asyncio
 import logging
+import os
 import re
 from io import BytesIO
 import uuid
 import httpx
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
 from html import escape
 from math import ceil
@@ -17,7 +18,8 @@ from telegram.constants import ChatAction
 from telegram.error import BadRequest, NetworkError, TelegramError
 from telegram.ext import Application, CallbackQueryHandler, CommandHandler, ContextTypes, MessageHandler, filters
 
-from .config import Settings, load_settings
+from .backup import create_database_backup
+from .config import ADMIN_SETTING_FIELDS, Settings, load_settings, parse_admin_setting
 from .database import Database
 from .openai_limits import ModelLimit, OpenAILimitsUnavailable, get_openai_limits
 from . import ui, model_catalog, image_generation
@@ -159,6 +161,101 @@ class BotState:
 
 def _state(context: ContextTypes.DEFAULT_TYPE) -> BotState:
     return context.application.bot_data["state"]
+
+
+async def _load_admin_settings(database: Database, settings: Settings) -> Settings:
+    """Migrate legacy environment values once and then treat the database as source of truth."""
+    values = {}
+    for name in ADMIN_SETTING_FIELDS:
+        key = f"config_{name}"
+        stored = await database.get_setting(key, "\0")
+        if stored == "\0":
+            value = parse_admin_setting(settings, name, str(getattr(settings, name)))
+            await database.set_setting(key, str(value))
+        else:
+            try:
+                value = parse_admin_setting(settings, name, stored)
+            except ValueError:
+                logger.warning("Ignoring invalid stored admin setting %s", name)
+                value = getattr(settings, name)
+        values[name] = value
+    configured = replace(settings, **values)
+    if configured.download_domain:
+        public_url = f"https://{configured.download_domain}"
+        if configured.download_base_url != public_url:
+            await database.set_setting("config_download_base_url", public_url)
+            configured = replace(configured, download_base_url=public_url)
+    os.environ["FFMPEG_THREADS"] = str(configured.ffmpeg_threads)
+    os.environ["FFMPEG_PRESET"] = configured.ffmpeg_preset
+    return configured
+
+
+ADMIN_SETTING_CATEGORIES = {
+    "keys": ("🔐 کلیدهای API", (
+        "openai_api_key", "openrouter_api_key", "openai_admin_key", "openai_project_id",
+    )),
+    "service": ("🌐 پردازش و سرویس", (
+        "openrouter_rpm_limit", "openrouter_max_retries", "video_max_minutes",
+        "video_max_height", "max_file_bytes", "ffmpeg_threads", "ffmpeg_preset",
+        "youtube_cookies_file", "instagram_cookies_file", "ytdlp_pot_base_url", "dub_separator_url",
+    )),
+    "delivery": ("📦 خروجی و دانلود", (
+        "download_ttl_hours", "watermark_text", "caption_model_path",
+    )),
+    "ssl": ("🌐 دامنه و SSL دانلود", ("download_domain",)),
+    "payments": ("💳 پرداخت و پشتیبانی", (
+        "card_to_card_number", "card_to_card_holder", "minimum_wallet_topup_toman",
+        "support_username",
+    )),
+    "captions": ("🎨 ظاهر زیرنویس", (
+        "caption_background_brightness", "caption_background_saturation",
+        "caption_subject_saturation", "caption_contrast", "caption_mask_smoothing",
+    )),
+    "model_defaults": ("🤖 پیش‌فرض‌های مدل", (
+        "openrouter_model", "openrouter_transcription_model", "openrouter_tts_model",
+        "openrouter_tts_voice", "translation_model", "whisper_model", "tts_model", "tts_voice",
+    )),
+}
+
+ADMIN_SETTING_LABELS = {
+    "openai_api_key": "کلید OpenAI",
+    "openrouter_api_key": "کلید OpenRouter",
+    "openai_admin_key": "کلید Admin API اوپن‌ای‌آی",
+    "openai_project_id": "شناسهٔ پروژهٔ OpenAI",
+    "openrouter_rpm_limit": "حداکثر درخواست OpenRouter در دقیقه",
+    "openrouter_max_retries": "تعداد تلاش مجدد OpenRouter",
+    "video_max_minutes": "حداکثر دقیقهٔ ویدیو",
+    "video_max_height": "حداکثر ارتفاع دانلود ویدیو",
+    "max_file_bytes": "حداکثر حجم ورودی به بایت",
+    "ffmpeg_threads": "تعداد رشته‌های FFmpeg",
+    "ffmpeg_preset": "حالت سرعت FFmpeg",
+    "youtube_cookies_file": "مسیر فایل کوکی یوتیوب",
+    "instagram_cookies_file": "مسیر فایل کوکی Instagram",
+    "ytdlp_pot_base_url": "نشانی سرویس PO Token یوتیوب",
+    "dub_separator_url": "نشانی سرویس جداسازی صدای دوبلهٔ هوشمند",
+    "download_base_url": "نشانی عمومی لینک دانلود",
+    "download_domain": "دامنهٔ HTTPS دانلود",
+    "download_ttl_hours": "مدت نگهداری لینک دانلود به ساعت",
+    "watermark_text": "متن واترمارک (پاک = غیرفعال)",
+    "caption_model_path": "مسیر مدل زیرنویس محلی",
+    "card_to_card_number": "شماره کارت مقصد",
+    "card_to_card_holder": "نام صاحب کارت",
+    "minimum_wallet_topup_toman": "حداقل شارژ کیف پول به تومان",
+    "support_username": "نام کاربری پشتیبانی",
+    "caption_background_brightness": "روشنایی پس‌زمینه (۰ تا ۱)",
+    "caption_background_saturation": "اشباع پس‌زمینه (۰ تا ۲)",
+    "caption_subject_saturation": "اشباع سوژه (۰ تا ۲)",
+    "caption_contrast": "کنتراست (۰ تا ۲)",
+    "caption_mask_smoothing": "هموارسازی ماسک (۰ تا ۰٫۹۹)",
+    "openrouter_model": "مدل پیش‌فرض ترجمه OpenRouter",
+    "openrouter_transcription_model": "مدل پیش‌فرض رونویسی OpenRouter",
+    "openrouter_tts_model": "مدل پیش‌فرض صدای OpenRouter",
+    "openrouter_tts_voice": "گویندهٔ پیش‌فرض OpenRouter",
+    "translation_model": "مدل پیش‌فرض ترجمه OpenAI",
+    "whisper_model": "مدل پیش‌فرض رونویسی OpenAI",
+    "tts_model": "مدل پیش‌فرض صدای OpenAI",
+    "tts_voice": "گویندهٔ پیش‌فرض OpenAI",
+}
 
 
 async def _edit_query_screen(query, text: str, **kwargs) -> None:
@@ -754,10 +851,7 @@ async def limits(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         model_limits = await asyncio.to_thread(get_openai_limits, state.settings)
     except OpenAILimitsUnavailable:
         await message.reply_text(
-            "برای نمایش زندهٔ سقف و مصرف، این دو مقدار را در .env سرور تنظیم کن:\n"
-            "OPENAI_ADMIN_KEY=کلید Admin سازمان\n"
-            "OPENAI_PROJECT_ID=شناسهٔ پروژه با پیشوند proj_\n\n"
-            "کلید Admin را در چت نفرست. پس از تنظیم، bot را با docker compose up -d --build bot بازسازی کن.\n"
+            "برای نمایش زندهٔ سقف و مصرف، در /admin ← تنظیمات و کلیدهای API، کلید Admin و شناسهٔ پروژه را وارد کن.\n"
             "تنظیم سقف‌ها: https://platform.openai.com/account/rate-limits\n"
             "Billing: https://platform.openai.com/account/billing"
         )
@@ -1048,6 +1142,8 @@ async def _show_admin_panel(send, state: BotState, user_id: int) -> None:
     original_audio_percent = _bounded_percent(
         await state.database.get_setting("dub_original_audio_percent", "10")
     )
+    api_ready = bool(state.settings.openai_api_key or state.settings.openrouter_api_key)
+    backup_interval = int(await state.database.get_setting("auto_backup_interval_hours", "0"))
     keyboard = InlineKeyboardMarkup([
         [InlineKeyboardButton("✏️ نرخ زیرنویس", callback_data="admin:edit:subtitle"),
          InlineKeyboardButton("✏️ نرخ دوبله", callback_data="admin:edit:dub")],
@@ -1059,12 +1155,15 @@ async def _show_admin_panel(send, state: BotState, user_id: int) -> None:
         [InlineKeyboardButton("🎟 تنظیم بسته‌های دقیقه", callback_data="admin:packages")],
         [InlineKeyboardButton("🤖 مدل‌ها و صدای دوبله", callback_data="admin:models", style="primary")],
         [InlineKeyboardButton("🔌 پردازشگر پیش‌فرض", callback_data="admin:providers")],
+        [InlineKeyboardButton("🔐 تنظیمات و کلیدهای API", callback_data="admin:config")],
+        [InlineKeyboardButton(f"💾 بکاپ خودکار: {'خاموش' if not backup_interval else f'هر {backup_interval} ساعت'}", callback_data="admin:backup")],
         [InlineKeyboardButton("🔄 به‌روزرسانی پنل", callback_data="admin:refresh")],
     ])
     await send(
         "🛠 پنل مدیریت\n\n"
         f"زیرنویس: {subtitle:,} تومان/دقیقه · دوبله: {dub:,} تومان/دقیقه\n"
         f"پردازشگر: {_provider_label(state.api_provider)}\n\n"
+        f"وضعیت API: {'آماده' if api_ready else 'تنظیم نشده؛ ابتدا از تنظیمات کلید API را وارد کن'}\n"
         f"کاربران: {stats['users']} · کل کارها: {stats['jobs']} · موفق: {stats['completed']}\n"
         f"درآمد پردازش خالص: {stats['net_sales_toman']:,} تومان · ماندهٔ کیف پول‌ها: {stats['wallet_total_toman']:,} تومان\n"
         f"هزینهٔ تخمینی API سفارش‌های اصلی: ${stats['api_cost_usd']:.4f}\n"
@@ -1072,6 +1171,122 @@ async def _show_admin_panel(send, state: BotState, user_id: int) -> None:
         "برای شارژ/کسر دستی، دکمه را بزن و شناسهٔ تلگرام و مبلغ تومان را با فاصله بفرست.",
         reply_markup=keyboard,
     )
+
+
+async def _show_admin_config(query, state: BotState) -> None:
+    buttons = [[ui.button(title, f"admin:settings:{name}")]
+               for name, (title, _) in ADMIN_SETTING_CATEGORIES.items()]
+    buttons.append([ui.button("‹ پنل مدیریت", "admin:refresh")])
+    await _edit_query_screen(
+        query,
+        "⚙️ تنظیمات ربات\n\nکلیدها، محدودیت‌ها، خروجی، پرداخت و گزینه‌های زیرنویس از اینجا ذخیره می‌شوند. «پاک» برای حذف مقدار اختیاری است.",
+        reply_markup=InlineKeyboardMarkup(buttons),
+    )
+
+
+async def _show_admin_setting_category(query, state: BotState, category: str) -> None:
+    item = ADMIN_SETTING_CATEGORIES.get(category)
+    if not item:
+        await query.answer("دسته‌بندی نامعتبر است.", show_alert=True)
+        return
+    title, names = item
+    rows = []
+    for name in names:
+        label = ADMIN_SETTING_LABELS[name]
+        value = getattr(state.settings, name)
+        if name in {"openai_api_key", "openai_admin_key", "openrouter_api_key"}:
+            current = "تنظیم شده" if value else "تنظیم نشده"
+        elif isinstance(value, str) and len(value) > 28:
+            current = value[:25] + "…"
+        else:
+            current = str(value) or "خالی"
+        rows.append([ui.button(f"{label}: {current}", f"admin:setting:{name}")])
+    rows.append([ui.button("‹ تنظیمات", "admin:config")])
+    await _edit_query_screen(query, f"{title}\n\nبرای تغییر هر مقدار دکمه‌اش را بزن و مقدار جدید را در پیام خصوصی بفرست.",
+                             reply_markup=InlineKeyboardMarkup(rows))
+
+
+async def _send_database_backup(application: Application, state: BotState) -> Path:
+    stamp = datetime.now(UTC).strftime("%Y%m%d-%H%M%S")
+    path = Path(state.settings.work_dir) / f"ytbot-backup-{stamp}.dump"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        await create_database_backup(state.settings.database_url, path)
+        with path.open("rb") as backup_file:
+            await application.bot.send_document(
+                chat_id=state.settings.provider_control_user_id,
+                document=backup_file,
+                filename=path.name,
+                caption=f"💾 پشتیبان دیتابیس ربات · {stamp} UTC",
+            )
+        return path
+    finally:
+        path.unlink(missing_ok=True)
+
+
+async def _domain_manager_request(method: str, domain: str = "") -> dict:
+    token_file = Path("/run/domain-control/domain_manager_token")
+    try:
+        token = token_file.read_text(encoding="utf-8").strip()
+    except OSError as exc:
+        raise RuntimeError("توکن داخلی مدیر دامنه پیدا نشد؛ کانتینرها را با Compose به‌روز کن.") from exc
+    if len(token) < 32:
+        raise RuntimeError("توکن داخلی مدیر دامنه معتبر نیست؛ سرویس‌ها را با Compose دوباره بساز.")
+    headers = {"Authorization": f"Bearer {token}"}
+    try:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(240, connect=5)) as client:
+            response = await client.request(
+                method,
+                "http://domain-manager:8088/domain",
+                headers=headers,
+                json={"domain": domain} if method == "POST" else None,
+            )
+    except httpx.HTTPError as exc:
+        raise RuntimeError("سرویس داخلی تنظیم دامنه در دسترس نیست.") from exc
+    try:
+        body = response.json()
+    except ValueError:
+        body = {}
+    if response.status_code != 200 or not body.get("ok"):
+        raise RuntimeError(str(body.get("error") or "مدیر دامنه نتوانست Caddy را پیکربندی کند.")[:350])
+    return body
+
+
+async def _automatic_backup_loop(application: Application, state: BotState) -> None:
+    while True:
+        interval = int(await state.database.get_setting("auto_backup_interval_hours", "0"))
+        if interval > 0:
+            now = datetime.now(UTC)
+            raw_next = await state.database.get_setting("auto_backup_next_at", "")
+            try:
+                next_at = datetime.fromisoformat(raw_next.replace("Z", "+00:00")) if raw_next else None
+                if next_at and next_at.tzinfo is None:
+                    next_at = next_at.replace(tzinfo=UTC)
+            except ValueError:
+                next_at = None
+            if next_at is None:
+                next_at = now + timedelta(hours=interval)
+                await state.database.set_setting("auto_backup_next_at", next_at.isoformat())
+            elif now >= next_at:
+                try:
+                    await _send_database_backup(application, state)
+                    next_at = datetime.now(UTC) + timedelta(hours=interval)
+                    await state.database.set_setting("auto_backup_next_at", next_at.isoformat())
+                except asyncio.CancelledError:
+                    raise
+                except Exception:
+                    logger.exception("Automatic database backup failed")
+                    try:
+                        await application.bot.send_message(
+                            chat_id=state.settings.provider_control_user_id,
+                            text="⚠️ بکاپ خودکار ناموفق بود. تنظیم دیتابیس و وجود ابزار pg_dump را بررسی کن؛ تلاش بعدی ۱۵ دقیقه دیگر انجام می‌شود.",
+                        )
+                    except TelegramError:
+                        logger.warning("Could not notify admin about automatic backup failure")
+                    await state.database.set_setting(
+                        "auto_backup_next_at", (datetime.now(UTC) + timedelta(minutes=15)).isoformat()
+                    )
+        await asyncio.sleep(60)
 
 
 async def _show_model_settings(query, state: BotState) -> None:
@@ -1147,6 +1362,61 @@ async def admin_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     action = (query.data or "").split(":")
     if len(action) > 1 and action[1] in {"images", "imagemodel", "imageprice", "imageeditprice", "contentprices", "contentprice"}:
         await query.answer("این سرویس دیگر فعال نیست.", show_alert=True)
+        return
+    if action == ["admin", "config"]:
+        await query.answer()
+        await _show_admin_config(query, state)
+        return
+    if len(action) == 3 and action[1] == "settings":
+        await query.answer()
+        await _show_admin_setting_category(query, state, action[2])
+        return
+    if len(action) == 3 and action[1] == "setting" and action[2] in ADMIN_SETTING_FIELDS:
+        name = action[2]
+        state.admin_editing[user.id] = f"config_{name}"
+        await query.answer()
+        secret = name in {"openai_api_key", "openai_admin_key", "openrouter_api_key"}
+        if secret:
+            help_text = "کلید را ارسال کن؛ برای حذف کلید ذخیره‌شده «پاک» بفرست."
+        elif name == "download_domain":
+            help_text = (
+                "دامنهٔ عمومی مثل files.example.com را بفرست. ربات Caddy را می‌سازد و HTTPS را تنظیم می‌کند؛ "
+                "رکورد DNS باید به IP این سرور برسد و پورت‌های ۸۰ و ۴۴۳ از بیرون باز باشند. "
+                "برای حذف دامنه «پاک» بفرست. لغو: /cancel"
+            )
+        else:
+            help_text = "مقدار جدید را بفرست؛ برای حذف مقدار اختیاری «پاک» بفرست. لغو: /cancel"
+        await _edit_query_screen(query, f"تنظیم {ADMIN_SETTING_LABELS[name]}\n{help_text}")
+        return
+    if action == ["admin", "backup"]:
+        interval = int(await state.database.get_setting("auto_backup_interval_hours", "0"))
+        next_at = await state.database.get_setting("auto_backup_next_at", "")
+        schedule_text = "خاموش" if interval <= 0 else f"هر {interval} ساعت"
+        next_text = f"\nزمان بکاپ بعدی: {next_at}" if interval > 0 and next_at else ""
+        await query.answer()
+        await _edit_query_screen(query,
+            f"💾 پشتیبان‌گیری\n\nبرنامهٔ فعلی: {schedule_text}{next_text}\n"
+            "فایل پشتیبان دیتابیس به گفت‌وگوی خصوصی مدیر فرستاده می‌شود. برای ارسال، مدیر باید قبلاً /start را زده باشد.",
+            reply_markup=InlineKeyboardMarkup([
+                [ui.button("⏱ تنظیم فاصلهٔ بکاپ", "admin:backup:interval")],
+                [ui.button("📤 همین حالا بکاپ بگیر", "admin:backup:now")],
+                [ui.button("‹ پنل مدیریت", "admin:refresh")],
+            ]),
+        )
+        return
+    if action == ["admin", "backup", "interval"]:
+        state.admin_editing[user.id] = "backup_interval"
+        await query.answer()
+        await _edit_query_screen(query,
+            "فاصلهٔ بکاپ را برحسب ساعت بفرست (۱ تا ۷۲۰). عدد ۰ بکاپ خودکار را خاموش می‌کند. نمونه: ۲۴\nلغو: /cancel")
+        return
+    if action == ["admin", "backup", "now"]:
+        await query.answer("در حال ساخت و ارسال بکاپ…")
+        try:
+            await _send_database_backup(context.application, state)
+        except Exception as exc:
+            logger.exception("Manual database backup failed")
+            await query.message.reply_text(f"❌ ساخت یا ارسال بکاپ ناموفق بود: {str(exc)[:500]}")
         return
     if action == ["admin", "images"]:
         await query.answer()
@@ -1235,7 +1505,7 @@ async def admin_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             return
         key = state.settings.openai_api_key if option.provider == "openai" else state.settings.openrouter_api_key
         if not key:
-            await query.answer("کلید این سرویس در سرور تنظیم نشده است.", show_alert=True)
+            await query.answer("کلید این سرویس را از /admin ← تنظیمات اضافه کن.", show_alert=True)
             return
         await state.database.set_setting(f"model_choice_{option.provider}_{option.stage}", option.code)
         await query.answer("مدل ذخیره شد.")
@@ -1302,8 +1572,92 @@ async def _save_admin_value(update: Update, state: BotState, application: Applic
     user, message = update.effective_user, update.effective_message
     if not user or not message:
         return
+    if message.chat.type != "private":
+        await message.reply_text("برای امنیت، تنظیمات مدیر را فقط در گفت‌وگوی خصوصی ربات بفرست.")
+        return
     key = state.admin_editing.get(user.id)
     if not key:
+        return
+    if key == "backup_interval":
+        raw = message.text.strip().translate(str.maketrans("۰۱۲۳۴۵۶۷۸۹٠١٢٣٤٥٦٧٨٩", "01234567890123456789"))
+        try:
+            interval = int(raw)
+            if not 0 <= interval <= 720:
+                raise ValueError
+        except ValueError:
+            await message.reply_text("یک عدد صحیح بین ۰ تا ۷۲۰ ساعت بفرست.")
+            return
+        await state.database.set_setting("auto_backup_interval_hours", str(interval))
+        next_at = datetime.now(UTC) + timedelta(hours=interval) if interval else None
+        await state.database.set_setting("auto_backup_next_at", next_at.isoformat() if next_at else "")
+        state.admin_editing.pop(user.id, None)
+        await message.reply_text("✅ بکاپ خودکار خاموش شد." if not interval else
+                                 f"✅ بکاپ هر {interval} ساعت به گفت‌وگوی خصوصی مدیر ارسال می‌شود.")
+        return
+    if key == "config_download_domain":
+        try:
+            domain = parse_admin_setting(state.settings, "download_domain", message.text)
+        except ValueError as exc:
+            await message.reply_text(str(exc))
+            return
+        try:
+            if domain:
+                result = await _domain_manager_request("POST", domain)
+                base_url = f"https://{domain}"
+            else:
+                await _domain_manager_request("DELETE")
+                base_url = ""
+        except RuntimeError as exc:
+            await message.reply_text(f"❌ تنظیم HTTPS انجام نشد: {exc}")
+            return
+        await state.database.set_settings({
+            "config_download_domain": domain,
+            "config_download_base_url": base_url,
+        })
+        state.settings = replace(state.settings, download_domain=domain, download_base_url=base_url)
+        application.bot_data["settings"] = state.settings
+        state.admin_editing.pop(user.id, None)
+        if domain:
+            status = "کانتینر Caddy از قبل فعال بود." if result.get("already_running") else "کانتینر Caddy ساخته و اجرا شد."
+            await message.reply_text(
+                f"✅ دامنهٔ دانلود روی https://{domain} تنظیم شد. {status}\n\n"
+                "مطمئن شو رکورد DNS دامنه به IP عمومی همین سرور اشاره می‌کند و پورت‌های ۸۰ و ۴۴۳ آزاد و باز هستند."
+            )
+        else:
+            await message.reply_text("✅ دامنهٔ HTTPS غیرفعال شد و کانتینر Caddy متوقف شد.")
+        return
+    if key.startswith("config_"):
+        name = key.removeprefix("config_")
+        try:
+            value = parse_admin_setting(state.settings, name, message.text)
+        except ValueError as exc:
+            await message.reply_text(str(exc))
+            return
+        await state.database.set_setting(f"config_{name}", str(value))
+        state.settings = replace(state.settings, **{name: value})
+        application.bot_data["settings"] = state.settings
+        if state.api_provider == "openai" and not state.settings.openai_api_key and state.settings.openrouter_api_key:
+            state.api_provider = "openrouter"
+            await state.database.set_setting("api_provider", state.api_provider)
+        elif state.api_provider == "openrouter" and not state.settings.openrouter_api_key and state.settings.openai_api_key:
+            state.api_provider = "openai"
+            await state.database.set_setting("api_provider", state.api_provider)
+        if name == "ffmpeg_threads":
+            os.environ["FFMPEG_THREADS"] = str(value)
+        elif name == "ffmpeg_preset":
+            os.environ["FFMPEG_PRESET"] = str(value)
+        state.admin_editing.pop(user.id, None)
+        confirmation = f"✅ تنظیم «{ADMIN_SETTING_LABELS.get(name, name)}» ذخیره شد."
+        if name in {"openai_api_key", "openai_admin_key", "openrouter_api_key"}:
+            try:
+                await application.bot.send_message(chat_id=message.chat_id, text=confirmation)
+            finally:
+                try:
+                    await message.delete()
+                except TelegramError:
+                    logger.info("Could not delete API key message from admin chat")
+        else:
+            await message.reply_text(confirmation)
         return
     if key in {"package_subtitle", "package_dub"}:
         raw = message.text.strip().replace(",", "").replace("٬", "")
@@ -1679,10 +2033,10 @@ async def choose_provider_callback(update: Update, context: ContextTypes.DEFAULT
         await query.answer("انتخاب نامعتبر است.", show_alert=True)
         return
     if provider == "openrouter" and not state.settings.openrouter_api_key:
-        await query.answer("OPENROUTER_API_KEY در .env تنظیم نشده است.", show_alert=True)
+        await query.answer("ابتدا کلید OpenRouter را از /admin ← تنظیمات وارد کن.", show_alert=True)
         return
     if provider == "openai" and not state.settings.openai_api_key:
-        await query.answer("OPENAI_API_KEY در .env تنظیم نشده است.", show_alert=True)
+        await query.answer("ابتدا کلید OpenAI را از /admin ← تنظیمات وارد کن.", show_alert=True)
         return
     await state.database.set_setting("api_provider", provider)
     state.api_provider = provider
@@ -3144,6 +3498,13 @@ async def post_init(application: Application) -> None:
     settings: Settings = application.bot_data["settings"]
     database = Database(settings.database_url)
     await database.initialize()
+    settings = await _load_admin_settings(database, settings)
+    application.bot_data["settings"] = settings
+    if settings.download_domain:
+        try:
+            await _domain_manager_request("POST", settings.download_domain)
+        except RuntimeError:
+            logger.exception("Could not restore the configured download domain")
     Path(settings.work_dir).mkdir(parents=True, exist_ok=True)
     download_dir = Path(settings.download_dir)
     download_dir.mkdir(parents=True, exist_ok=True)
@@ -3211,6 +3572,9 @@ async def post_init(application: Application) -> None:
         BotCommand("cancel", "لغو درخواست یا شارژ"),
     ])
     application.bot_data["worker_task"] = asyncio.create_task(worker(application), name="video-worker")
+    application.bot_data["backup_task"] = asyncio.create_task(
+        _automatic_backup_loop(application, state), name="automatic-database-backup"
+    )
 
 
 async def post_shutdown(application: Application) -> None:
@@ -3223,6 +3587,13 @@ async def post_shutdown(application: Application) -> None:
     if worker_task:
         await state.queue.put(None)
         await worker_task
+    backup_task = application.bot_data.get("backup_task")
+    if backup_task:
+        backup_task.cancel()
+        try:
+            await backup_task
+        except asyncio.CancelledError:
+            pass
     await state.database.close()
 
 

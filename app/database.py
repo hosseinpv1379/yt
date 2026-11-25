@@ -371,6 +371,16 @@ class Database:
             else:
                 setting.value = value
 
+    async def set_settings(self, values: dict[str, str]) -> None:
+        """Persist a related group of settings in one transaction."""
+        async with self.sessions.begin() as session:
+            for name, value in values.items():
+                setting = await session.get(BotSetting, name)
+                if setting is None:
+                    session.add(BotSetting(name=name, value=value))
+                else:
+                    setting.value = value
+
     async def accept_terms(self, user_id: int) -> None:
         async with self.sessions.begin() as session:
             record = await session.get(User, user_id)

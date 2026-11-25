@@ -1,18 +1,50 @@
 services:
+  db-credential-init:
+    image: alpine:3.22
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - >-
+        umask 077;
+        if [ ! -s /state/postgres_password ]; then
+          if [ -s /legacy/postgres_password ]; then
+            cp /legacy/postgres_password /state/postgres_password;
+          elif [ -n "$$LEGACY_POSTGRES_PASSWORD" ]; then
+            printf '%s' "$$LEGACY_POSTGRES_PASSWORD" > /state/postgres_password;
+          else
+            head -c 48 /dev/urandom | base64 | tr -d '\n' > /state/postgres_password;
+          fi;
+          chmod 0444 /state/postgres_password;
+        fi;
+        if [ ! -s /control/domain_manager_token ]; then
+          head -c 48 /dev/urandom | base64 | tr -d '\n' > /control/domain_manager_token;
+          chmod 0444 /control/domain_manager_token;
+        fi
+    environment:
+      LEGACY_POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-}
+    volumes:
+      - database-secret:/state
+      - domain-control-secret:/control
+      - ./secrets:/legacy:ro
+    restart: "no"
+
   database:
     image: postgres:17-alpine
     restart: unless-stopped
     environment:
       POSTGRES_DB: ytbot
       POSTGRES_USER: ytbot
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+      POSTGRES_PASSWORD_FILE: /run/database-secret/postgres_password
     volumes:
       - postgres-data:/var/lib/postgresql/data
+      - database-secret:/run/database-secret:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ytbot -d ytbot"]
       interval: 5s
       timeout: 5s
       retries: 12
+    depends_on:
+      db-credential-init:
+        condition: service_completed_successfully
     networks:
       - database
 
@@ -69,82 +101,84 @@ services:
     networks:
       - app
 
+  domain-manager:
+    build: .
+    image: youtube-fa-subtitle-bot:local
+    command: ["python", "-m", "app.domain_manager"]
+    user: "0:0"
+    restart: unless-stopped
+    stop_grace_period: 30s
+    environment:
+      DOMAIN_MANAGER_TOKEN_FILE: /run/domain-control/domain_manager_token
+      CADDY_CONFIG_DIR: /shared-caddy-config
+      DOMAIN_MANAGER_PORT: "8088"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - domain-control-secret:/run/domain-control:ro
+      - caddy-config:/shared-caddy-config
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8088/health', timeout=2)"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+    depends_on:
+      db-credential-init:
+        condition: service_completed_successfully
+      downloads-nginx:
+        condition: service_started
+    networks:
+      - domain-control
+
   bot:
     build: .
     image: youtube-fa-subtitle-bot:local
     restart: unless-stopped
     init: true
     environment:
-      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
-      ALLOWED_USER_IDS: ${ALLOWED_USER_IDS:-}
-      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
-      OPENAI_ADMIN_KEY: ${OPENAI_ADMIN_KEY:-}
-      OPENAI_PROJECT_ID: ${OPENAI_PROJECT_ID:-}
-      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
-      OPENROUTER_MODEL: ${OPENROUTER_MODEL:-openai/gpt-6-luna}
-      OPENROUTER_TRANSCRIPTION_MODEL: ${OPENROUTER_TRANSCRIPTION_MODEL:-openai/whisper-1}
-      OPENROUTER_TTS_MODEL: ${OPENROUTER_TTS_MODEL:-google/gemini-3.8-flash-lite-tts}
-      OPENROUTER_TTS_VOICE: ${OPENROUTER_TTS_VOICE:-Kore}
-      OPENROUTER_RPM_LIMIT: ${OPENROUTER_RPM_LIMIT:-10}
-      OPENROUTER_MAX_RETRIES: ${OPENROUTER_MAX_RETRIES:-8}
-      DEFAULT_API_PROVIDER: ${DEFAULT_API_PROVIDER:-}
-      PROVIDER_CONTROL_USER_ID: ${PROVIDER_CONTROL_USER_ID:-}
-      TRANSLATION_MODEL: ${TRANSLATION_MODEL:-gpt-6-luna}
-      WHISPER_MODEL: ${WHISPER_MODEL:-whisper-1}
-      CAPTION_MODEL_PATH: ${CAPTION_MODEL_PATH:-/data/models/whisper-medium}
-      CAPTION_FONTS_DIR: ${CAPTION_FONTS_DIR:-/app/assets/fonts}
-      CAPTION_BACKGROUND_BRIGHTNESS: ${CAPTION_BACKGROUND_BRIGHTNESS:-0.55}
-      CAPTION_BACKGROUND_SATURATION: ${CAPTION_BACKGROUND_SATURATION:-0.80}
-      CAPTION_SUBJECT_SATURATION: ${CAPTION_SUBJECT_SATURATION:-1.25}
-      CAPTION_CONTRAST: ${CAPTION_CONTRAST:-1.10}
-      CAPTION_MASK_SMOOTHING: ${CAPTION_MASK_SMOOTHING:-0.75}
-      VIDEO_MAX_MINUTES: ${VIDEO_MAX_MINUTES:-60}
-      FFMPEG_THREADS: ${FFMPEG_THREADS:-2}
-      FFMPEG_PRESET: ${FFMPEG_PRESET:-superfast}
-      VIDEO_MAX_HEIGHT: ${VIDEO_MAX_HEIGHT:-720}
-      MAX_FILE_BYTES: ${MAX_FILE_BYTES:-1000000000}
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:?Set TELEGRAM_BOT_TOKEN in .env}
+      ADMIN_USER_ID: ${ADMIN_USER_ID:?Set ADMIN_USER_ID in .env}
       WORK_DIR: /data
-      DUB_SEPARATOR_URL: ${DUB_SEPARATOR_URL:-http://dub-separator:8090}
-      YOUTUBE_COOKIES_FILE: ${YOUTUBE_COOKIES_FILE:-}
-      INSTAGRAM_COOKIES_FILE: ${INSTAGRAM_COOKIES_FILE:-}
-      YTDLP_POT_BASE_URL: ${YTDLP_POT_BASE_URL:-http://pot-provider:4416}
       DOWNLOAD_DIR: /downloads
-      DOWNLOAD_BASE_URL: ${DOWNLOAD_BASE_URL:-}
-      DOWNLOAD_TTL_HOURS: ${DOWNLOAD_TTL_HOURS:-24}
-      TTS_MODEL: ${TTS_MODEL:-gpt-realtime-2.1-mini}
-      TTS_VOICE: ${TTS_VOICE:-marin}
-      WATERMARK_TEXT: ${WATERMARK_TEXT:-}
-      DEFAULT_SUBTITLE_PRICE_TOMAN_PER_MINUTE: ${DEFAULT_SUBTITLE_PRICE_TOMAN_PER_MINUTE:-5000}
-      DEFAULT_DUB_PRICE_TOMAN_PER_MINUTE: ${DEFAULT_DUB_PRICE_TOMAN_PER_MINUTE:-10000}
-      CARD_TO_CARD_NUMBER: ${CARD_TO_CARD_NUMBER:-}
-      CARD_TO_CARD_HOLDER: ${CARD_TO_CARD_HOLDER:-}
-      MINIMUM_WALLET_TOPUP_TOMAN: ${MINIMUM_WALLET_TOPUP_TOMAN:-50000}
-      SUPPORT_USERNAME: ${SUPPORT_USERNAME:-}
-      DATABASE_URL: postgresql+asyncpg://ytbot:${POSTGRES_PASSWORD}@database:5432/ytbot
+      DUB_SEPARATOR_URL: http://dub-separator:8090
+      YTDLP_POT_BASE_URL: http://pot-provider:4416
     volumes:
       - workdata:/data
       - download-store:/downloads
+      - database-secret:/run/database-secret:ro
+      - domain-control-secret:/run/domain-control:ro
       - ./secrets:/run/secrets:ro
     stop_grace_period: 30s
     depends_on:
+      db-credential-init:
+        condition: service_completed_successfully
       database:
         condition: service_healthy
       pot-provider:
         condition: service_started
       download-init:
         condition: service_completed_successfully
+      domain-manager:
+        condition: service_healthy
     networks:
       - app
       - database
+      - domain-control
 
 volumes:
   workdata:
   download-store:
   postgres-data:
   separator-models:
+  database-secret:
+  domain-control-secret:
+  caddy-config:
+  caddy-data:
+  caddy-runtime:
 
 networks:
   app:
     driver: bridge
   database:
+    internal: true
+  domain-control:
     internal: true

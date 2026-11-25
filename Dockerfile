@@ -8,6 +8,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
       ffmpeg \
+      postgresql-client \
       fonts-vazirmatn \
       fonts-montserrat \
       fonts-noto-core \

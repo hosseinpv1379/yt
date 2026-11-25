@@ -1,3 +1,5 @@
+# Legacy manual HTTPS front end. The normal /admin flow provisions Caddy itself.
+# Do not run this together with the managed download Caddy; they both need ports 80/443.
 # Optional public HTTPS front end. Start with:
 # docker compose -f docker-compose.yml -f docker-compose.https.yml up -d
 services:
