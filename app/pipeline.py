@@ -41,6 +41,18 @@ ProgressCallback = Callable[[str, int], None]
 WHISPER_PRICE_PER_MINUTE = 0.006
 
 
+def _ffmpeg_threads() -> int:
+    try:
+        return max(1, min(16, int(os.getenv("FFMPEG_THREADS", "2"))))
+    except ValueError:
+        return 2
+
+
+def _ffmpeg_preset() -> str:
+    value = os.getenv("FFMPEG_PRESET", "superfast").strip().lower()
+    return value if value in {"ultrafast", "superfast", "veryfast", "faster", "fast", "medium"} else "superfast"
+
+
 class OpenRouterRateLimiter:
     """Conservative process-wide pacing plus provider Retry-After cooldowns."""
 
@@ -81,13 +93,15 @@ class OpenRouterRateLimiter:
 
 
 _OPENROUTER_CLIENT: OpenAI | None = None
+_OPENROUTER_CLIENT_CONFIG: tuple[str, int, int] | None = None
 _OPENROUTER_CLIENT_LOCK = threading.Lock()
 
 
 def _openrouter_client(settings: Settings) -> OpenAI:
-    global _OPENROUTER_CLIENT
+    global _OPENROUTER_CLIENT, _OPENROUTER_CLIENT_CONFIG
     with _OPENROUTER_CLIENT_LOCK:
-        if _OPENROUTER_CLIENT is None:
+        config = (settings.openrouter_api_key, settings.openrouter_rpm_limit, settings.openrouter_max_retries)
+        if _OPENROUTER_CLIENT is None or _OPENROUTER_CLIENT_CONFIG != config:
             limiter = OpenRouterRateLimiter(settings.openrouter_rpm_limit)
             http_client = httpx.Client(
                 event_hooks={
@@ -101,6 +115,7 @@ def _openrouter_client(settings: Settings) -> OpenAI:
                 max_retries=settings.openrouter_max_retries,
                 http_client=http_client,
             )
+            _OPENROUTER_CLIENT_CONFIG = config
         return _OPENROUTER_CLIENT
 TRANSLATION_PRICES_PER_MILLION = {
     "gpt-4o-mini": (0.15, 0.60, 0.075),
@@ -147,6 +162,10 @@ def validate_youtube_url(url: str) -> bool:
 
 
 def _run(command: list[str], *, cwd: Path | None = None) -> None:
+    if command and command[0] == "ffmpeg":
+        count = str(_ffmpeg_threads())
+        command = [command[0], "-threads", count, "-filter_threads", count,
+                   "-filter_complex_threads", count, *command[1:]]
     result = subprocess.run(command, cwd=cwd, capture_output=True, text=True)
     if result.returncode:
         detail = (result.stderr or result.stdout)[-3000:]
@@ -660,12 +679,20 @@ def _render(video: Path, srt_name: str, output: Path, watermark_text: str = "") 
     watermark = _watermark_filter(watermark_text, output.parent)
     if watermark:
         filters.append(watermark)
+    # AAC can be copied into MP4 directly, avoiding an extra lossy encode.
+    try:
+        probe = subprocess.run(["ffprobe", "-v", "error", "-select_streams", "a:0",
+                                "-show_entries", "stream=codec_name", "-of", "default=nw=1:nk=1", str(video)],
+                               capture_output=True, text=True, check=True)
+        audio_codec = "copy" if probe.stdout.strip() == "aac" else "aac"
+    except (OSError, subprocess.SubprocessError):
+        audio_codec = "aac"
     _run(
         [
             "ffmpeg", "-hide_banner", "-loglevel", "error", "-y", "-i", str(video),
             "-vf", ",".join(filters),
-            "-c:v", "libx264", "-preset", "veryfast", "-crf", "23",
-            "-c:a", "aac", "-b:a", "128k", "-movflags", "+faststart", str(output),
+            "-c:v", "libx264", "-preset", _ffmpeg_preset(), "-threads", str(_ffmpeg_threads()), "-crf", "23",
+            "-c:a", audio_codec, "-b:a", "128k", "-movflags", "+faststart", str(output),
         ],
         cwd=output.parent,
     )
@@ -1128,7 +1155,7 @@ def _mux_dubbed_video(
     watermark = _watermark_filter(watermark_text, output.parent)
     if watermark:
         args.extend([
-            "-vf", watermark, "-c:v", "libx264", "-preset", "veryfast", "-crf", "23",
+            "-vf", watermark, "-c:v", "libx264", "-preset", _ffmpeg_preset(), "-threads", str(_ffmpeg_threads()), "-crf", "23",
         ])
     else:
         args.extend(["-c:v", "copy"])
@@ -1174,6 +1201,7 @@ def process_video(
     team_glossary: str = "",
     dub_mode: str = "simple",
     original_audio_percent: int = 10,
+    local_separator=None,
 ) -> tuple[Path, Path, Path, OpenAICost]:
     job_dir.mkdir(parents=True, exist_ok=True)
     _check_cancel(cancel_event)
@@ -1182,15 +1210,18 @@ def process_video(
     video, context = _download(url, job_dir, settings, selected_height, progress_callback)
     background = None
     if mode == "dub" and dub_mode == "smart":
-        if not settings.dub_separator_url:
+        if not settings.dub_separator_url and local_separator is None:
             raise RuntimeError("سرویس دوبلهٔ هوشمند فعال نیست.")
         if progress_callback:
             progress_callback("تفکیک صدای پس‌زمینه (ممکن است طول بکشد)", 20)
-        try:
-            response = httpx.post(settings.dub_separator_url + "/separate", json={"job_id": job_dir.name, "source": video.name}, timeout=httpx.Timeout(14400, connect=5))
-            response.raise_for_status()
-        except httpx.HTTPError as exc:
-            raise RuntimeError("تفکیک صدای پس‌زمینه ناموفق بود.") from exc
+        if local_separator is not None:
+            local_separator(job_dir, video)
+        else:
+            try:
+                response = httpx.post(settings.dub_separator_url + "/separate", json={"job_id": job_dir.name, "source": video.name}, timeout=httpx.Timeout(14400, connect=5))
+                response.raise_for_status()
+            except httpx.HTTPError as exc:
+                raise RuntimeError("تفکیک صدای پس‌زمینه ناموفق بود.") from exc
         background = job_dir / "dub-background.wav"
         if not background.is_file() or abs(_media_duration(background) - _media_duration(video)) > 1.0:
             raise RuntimeError("فایل صدای تفکیک‌شده نامعتبر است.")

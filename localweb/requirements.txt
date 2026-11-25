@@ -1,0 +1,3 @@
+-r ../requirements.txt
+keyring>=25,<26
+filelock>=3,<4

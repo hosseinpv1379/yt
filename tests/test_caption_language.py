@@ -48,7 +48,7 @@ class CaptionLanguageFlowTests(unittest.IsolatedAsyncioTestCase):
                             database=database, api_provider="openai")
                         item = {"token": "abcd", "duration": 5, "file_id": "video"}
                         application = types.SimpleNamespace(bot_data={"state": state, "video_captions_pending": {42: item}})
-                        query = types.SimpleNamespace(data="vclip:mode:abcd:both", answer=AsyncMock(),
+                        query = types.SimpleNamespace(data="vclip:mode:abcd:caption", answer=AsyncMock(),
                             edit_message_text=AsyncMock(), message=types.SimpleNamespace(
                                 chat=types.SimpleNamespace(type="private"), chat_id=42, message_id=7))
                         update = types.SimpleNamespace(callback_query=query, effective_user=types.SimpleNamespace(id=42))
@@ -68,7 +68,7 @@ class CaptionLanguageFlowTests(unittest.IsolatedAsyncioTestCase):
                         await module.callback(update, context)
                         job = state.queue.get_nowait()
                         self.assertEqual(job.language, expected)
-                        self.assertEqual(job.edit_mode, "both")
+                        self.assertEqual(job.edit_mode, "caption")
                         database.create_wallet_job.assert_awaited_once()
 
 

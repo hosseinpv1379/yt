@@ -17,12 +17,13 @@ def run(args):
     subprocess.run(args, check=True, stdout=subprocess.DEVNULL, timeout=10800)
 
 
-def separate(job_id, source):
+def separate(job_id, source, root=None):
+    root = (root or ROOT).resolve()
     if not re.fullmatch(r"[0-9a-f]{32}", job_id) or Path(source).name != source:
         raise ValueError("invalid job or source")
-    job = (ROOT / job_id).resolve()
+    job = (root / job_id).resolve()
     video = (job / source).resolve()
-    if job.parent != ROOT or video.parent != job or not video.is_file():
+    if job.parent != root or video.parent != job or not video.is_file():
         raise ValueError("invalid source")
     temp = job / "separator-work"
     shutil.rmtree(temp, ignore_errors=True)

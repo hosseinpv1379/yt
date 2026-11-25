@@ -18,9 +18,7 @@ def home_keyboard() -> InlineKeyboardMarkup:
 
 def services_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
-        [button('🎬 زیرنویس و بهبود رنگ ویدیو', 'vclip:start', style='primary')],
-        [button('🎨 ساخت تصویر', 'image:start', style='primary')],
-        [button('📝 خلاصه و محتوای تکمیلی', 'content:list')],
+        [button('📝 زیرنویس ویدیوی ارسالی', 'vclip:start', style='primary')],
         [button('🎟 بسته‌های دقیقه', 'packs:list')],
         [button('💎 تعرفه‌ها', 'menu:pricing')],
         [button('‹ بازگشت', 'menu:home')],
@@ -32,7 +30,6 @@ def support_keyboard() -> InlineKeyboardMarkup:
         [button('✉️ ارسال پیام', 'menu:contact', style='primary')],
         [button('📖 راهنما', 'menu:help')],
         [button('📜 شرایط استفاده', 'menu:terms')],
-        [button('👥 تیم', 'menu:team')],
         [button('‹ بازگشت', 'menu:home')],
     ])
 
@@ -40,9 +37,6 @@ def support_keyboard() -> InlineKeyboardMarkup:
 def orders_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [button('🎬 زیرنویس و دوبله', 'orders:list:processing:0', style='primary')],
-        [button('📥 دانلود فایل', 'orders:list:download:0')],
-        [button('📝 محتوای تکمیلی', 'orders:list:content:0')],
-        [button('🎨 سفارش‌های تصویر', 'image:history:0')],
         [button('⏳ سفارش فعال', 'menu:status')],
         [button('‹ بازگشت', 'menu:home')],
     ])
@@ -51,7 +45,7 @@ def orders_keyboard() -> InlineKeyboardMarkup:
 def home_text(balance: int) -> str:
     return (
         '🎬 <b>ویدیو فارسی</b>\n'
-        'زیرنویس، دوبله و دانلود ویدیو\n\n'
+        'زیرنویس و دوبلهٔ ویدیو\n\n'
         'لینک را بفرست یا از منو انتخاب کن.\n'
         f'👛 موجودی: <b>{balance:,} تومان</b>'
     )

@@ -4,6 +4,10 @@ secrets/
 data/
 .venv/
 .venv-graphify/
+.venv-localweb/
+.localweb-tools/
+.localweb-python/
+.localweb-cache/
 .agents/
 .cursor/
 graphify-out/

@@ -190,6 +190,11 @@ async def _show_screen(update: Update, text: str, **kwargs) -> None:
         await message.reply_text(text, **kwargs)
 
 
+async def _removed_feature_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if update.callback_query:
+        await update.callback_query.answer("این سرویس دیگر فعال نیست؛ زیرنویس یا دوبله را انتخاب کن.", show_alert=True)
+
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user, message = update.effective_user, update.effective_message
     if not user or not message:
@@ -220,20 +225,14 @@ async def receive_link(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     if not user or not message or not message.text:
         return
     await state.database.upsert_user(user, True)
-    if user.id in state.subtitle_editing:
-        await _receive_subtitle_edit(update, context)
-        return
     if user.id in state.admin_editing:
         await _save_admin_value(update, state, context.application)
         return
     if message.chat.type != "private":
         await message.reply_text("برای حفظ حریم خصوصی، لطفاً در گفت‌وگوی خصوصی ربات پیام بده.")
         return
-    if user.id in state.awaiting_image_prompt:
-        await _receive_image_prompt(update, context)
-        return
     url = message.text.strip()
-    source_type = classify_link(url)
+    source_type = "youtube" if validate_youtube_url(url) else None
     if user.id in state.awaiting_support:
         await _send_support_request(update, context, url)
         return
@@ -253,11 +252,8 @@ async def receive_link(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         else:
             await message.reply_text("درخواست شارژ پیدا نشد یا منقضی شده است.")
         return
-    if source_type == "spotify_unsupported":
-        await message.reply_text("در Spotify فعلاً فقط لینک تک‌آهنگ پشتیبانی می‌شود؛ آلبوم، پلی‌لیست و پادکست پشتیبانی نمی‌شوند.", reply_markup=ui.back_keyboard())
-        return
     if not source_type:
-        await message.reply_text("لینک یوتیوب، اینستاگرام، تیک‌تاک، X، فیسبوک، ویمئو، آپارات، ساندکلاد یا تک‌آهنگ Spotify بفرست.", reply_markup=ui.back_keyboard())
+        await message.reply_text("لینک ویدیوی یوتیوب را بفرست.", reply_markup=ui.back_keyboard())
         return
     if user.id in state.active or user.id in state.pending_by_user:
         await message.reply_text("یک سفارش باز داری. وضعیت آن را ببین یا لغو کن.",
@@ -265,9 +261,6 @@ async def receive_link(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
                 [ui.button("📦 وضعیت سفارش", "menu:status", style="primary")],
                 [ui.button("‹ بازگشت", "menu:home")],
             ]))
-        return
-    if state.image_quotes.get(str(user.id), {}).get("confirming"):
-        await message.reply_text("سفارش تصویر در حال ثبت است؛ چند لحظه صبر کن.")
         return
 
     if not await state.database.has_accepted_terms(user.id):
@@ -285,33 +278,6 @@ async def receive_link(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     )
     state.pending_quality[token] = selection
     state.pending_by_user[user.id] = token
-    if source_type != "youtube":
-        selection.download_source = source_type
-        if source_type == "spotify":
-            text = "🎵 دانلود آهنگ\nفایل از Spotify دریافت نمی‌شود؛ نسخهٔ مشابه از YouTube پیدا می‌شود. ممکن است نتیجه متفاوت باشد."
-            keyboard = InlineKeyboardMarkup([
-                [ui.button("🔎 دریافت نسخهٔ مشابه MP3", f"dl:{token}:audio", style="primary")],
-                [ui.button("‹ بازگشت (لغو)", f"order_cancel:{token}", style="danger")],
-            ])
-        else:
-            text = "📥 دانلود فایل\n\nنوع خروجی را انتخاب کن. این مسیر فقط دانلود است و هزینهٔ پردازش ندارد."
-            buttons = []
-            if is_instagram_profile_url(url):
-                text = "🖼 دانلود عکس پروفایل اینستاگرام\n\nعکس پروفایل را با بالاترین وضوحی که از اینستاگرام در دسترس باشد دریافت می‌کنم."
-                buttons.append([ui.button("⬇️ دانلود عکس پروفایل", f"dl:{token}:profile", style="primary")])
-            elif is_instagram_media_url(url):
-                text = "📥 دانلود اینستاگرام\n\nنوع مدیا را خودکار تشخیص می‌دهم و با قالب مناسب می‌فرستم: عکس، ویدیو، ریلز، استوری یا کاروسل. چند مدیا در یک فایل ZIP قرار می‌گیرد."
-                buttons.append([ui.button("⬇️ دانلود هوشمند", f"dl:{token}:media", style="primary")])
-            else:
-                buttons.append([
-                    ui.button("🎬 ویدیو", f"dl:{token}:video", style="primary"),
-                    ui.button("🎵 فایل صوتی MP3", f"dl:{token}:audio"),
-                ])
-            buttons.append([ui.button("‹ بازگشت (لغو)", f"order_cancel:{token}", style="danger")])
-            keyboard = InlineKeyboardMarkup(buttons)
-        await context.application.bot.edit_message_text(text, chat_id=selection.chat_id,
-            message_id=selection.message_id, reply_markup=keyboard)
-        return
     await context.application.bot.edit_message_text(
         "🎬 سفارش جدید  ·  ۱ از ۳\n\nکدام خروجی را می‌خواهی؟\n"
         "📝 زیرنویس: متن فارسی همراه ویدیو\n🎙 دوبله: جایگزینی صدای اصلی با صدای فارسی هوش مصنوعی",
@@ -559,8 +525,7 @@ async def confirm_order(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     job_id = uuid.uuid4().hex
     try:
         models = await model_catalog.load_selection(state.database, state.settings, selection.api_provider)
-        team = await state.database.team_info(user.id)
-        team_glossary = team["glossary"] if team else ""
+        team_glossary = ""
         required = [models.stt, models.translation] + ([models.tts] if mode == "dub" else [])
         missing = {item.provider for item in required if not (
             state.settings.openai_api_key if item.provider == "openai" else state.settings.openrouter_api_key
@@ -1092,8 +1057,6 @@ async def _show_admin_panel(send, state: BotState, user_id: int) -> None:
         [InlineKeyboardButton("👤 بررسی کاربر", callback_data="admin:wallet:lookup")],
         [InlineKeyboardButton(f"🧾 رسیدهای منتظر بررسی ({stats['pending_deposits']})", callback_data="admin:deposits")],
         [InlineKeyboardButton("🎟 تنظیم بسته‌های دقیقه", callback_data="admin:packages")],
-        [InlineKeyboardButton("📝 قیمت محتوای تکمیلی", callback_data="admin:contentprices")],
-        [InlineKeyboardButton("🎨 تنظیم ساخت تصویر", callback_data="admin:images", style="primary")],
         [InlineKeyboardButton("🤖 مدل‌ها و صدای دوبله", callback_data="admin:models", style="primary")],
         [InlineKeyboardButton("🔌 پردازشگر پیش‌فرض", callback_data="admin:providers")],
         [InlineKeyboardButton("🔄 به‌روزرسانی پنل", callback_data="admin:refresh")],
@@ -1105,8 +1068,6 @@ async def _show_admin_panel(send, state: BotState, user_id: int) -> None:
         f"کاربران: {stats['users']} · کل کارها: {stats['jobs']} · موفق: {stats['completed']}\n"
         f"درآمد پردازش خالص: {stats['net_sales_toman']:,} تومان · ماندهٔ کیف پول‌ها: {stats['wallet_total_toman']:,} تومان\n"
         f"هزینهٔ تخمینی API سفارش‌های اصلی: ${stats['api_cost_usd']:.4f}\n"
-        f"هزینهٔ ثبت‌شدهٔ محتوای تکمیلی: ${stats['content_cost_usd']:.4f} · موارد نامشخص: {stats['content_cost_unknown']}\n"
-        f"هزینهٔ ثبت‌شدهٔ تصاویر: ${stats.get('image_cost_usd', 0):.4f} · بهینه‌سازی: ${stats.get('image_optimizer_cost_usd', 0):.4f} · تصویر با هزینهٔ نامشخص: {stats.get('image_cost_unknown', 0)}\n"
         f"رسیدهای منتظر بررسی: {stats['pending_deposits']}\n\n"
         "برای شارژ/کسر دستی، دکمه را بزن و شناسهٔ تلگرام و مبلغ تومان را با فاصله بفرست.",
         reply_markup=keyboard,
@@ -1184,6 +1145,9 @@ async def admin_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         await query.answer("فقط مدیر دسترسی دارد.", show_alert=True)
         return
     action = (query.data or "").split(":")
+    if len(action) > 1 and action[1] in {"images", "imagemodel", "imageprice", "imageeditprice", "contentprices", "contentprice"}:
+        await query.answer("این سرویس دیگر فعال نیست.", show_alert=True)
+        return
     if action == ["admin", "images"]:
         await query.answer()
         model = await image_generation.selected_model(state.database)
@@ -1493,7 +1457,7 @@ async def menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
                     [ui.button("‹ بازگشت", "menu:home")],
                 ]))
             return
-        await _edit_query_screen(query, "🎬 سفارش جدید\nلینک ویدیو یا آهنگ را همین‌جا بفرست.",
+        await _edit_query_screen(query, "🎬 سفارش جدید\nلینک ویدیوی یوتیوب را همین‌جا بفرست.",
                                       reply_markup=ui.back_keyboard())
     elif action == "services":
         await _edit_query_screen(query, "✨ خدمات\nیکی از گزینه‌ها را انتخاب کن:", reply_markup=ui.services_keyboard())
@@ -1502,7 +1466,7 @@ async def menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     elif action == "status":
         if user.id in state.active:
             job = state.active[user.id]
-            label = ("زیرنویس و اصلاح رنگ" if isinstance(job, VideoCaptionJob) else "دانلود" if isinstance(job, DownloadJob) else "ساخت تصویر" if isinstance(job, ImageJob) else "محتوای تکمیلی" if isinstance(job, ContentJob) else
+            label = ("زیرنویس ویدیوی ارسالی" if isinstance(job, VideoCaptionJob) else "دانلود" if isinstance(job, DownloadJob) else "ساخت تصویر" if isinstance(job, ImageJob) else "محتوای تکمیلی" if isinstance(job, ContentJob) else
                      "زیرنویس" if job.mode == "subtitle" else "دوبله")
             await _edit_query_screen(query,
                 f"📦 سفارش فعال\n\nنوع: {label}\nشمارهٔ سفارش: {job.id[:8]}\n"
@@ -1528,8 +1492,6 @@ async def menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
                 [ui.button("📦 وضعیت سفارش", "menu:status", style="primary")],
                 [ui.button("‹ بازگشت", "menu:home")],
             ]))
-    elif action == "team":
-        await team_command(update, context)
     elif action == "history":
         await history(update, context)
     elif action == "terms":
@@ -1558,9 +1520,6 @@ async def receive_deposit_proof(update: Update, context: ContextTypes.DEFAULT_TY
         return
     if message.chat.type != "private":
         await message.reply_text("رسید را فقط در گفت‌وگوی خصوصی ربات بفرست.")
-        return
-    if user.id in _state(context).awaiting_image_prompt:
-        await _receive_image_reference(update, context)
         return
     pending = await _state(context).database.get_user_pending_deposit(user.id)
     if not pending or pending["status"] != "awaiting_proof":
@@ -1849,7 +1808,7 @@ def _order_button_label(row: dict, category: str) -> str:
 def _order_kind(category: str, kind: str) -> str:
     if category == "processing":
         if kind == "caption_video":
-            return "زیرنویس و اصلاح رنگ ویدیوی ارسالی"
+            return "زیرنویس ویدیوی ارسالی"
         return "زیرنویس فارسی" if kind == "subtitle" else "دوبلهٔ فارسی"
     if category == "download":
         return {"audio": "فایل صوتی", "media": "مدیای اینستاگرام", "profile": "عکس پروفایل اینستاگرام"}.get(kind, "ویدیو")
@@ -1899,7 +1858,7 @@ async def orders_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         await query.answer()
         await _edit_query_screen(query, "📦 سفارش‌های من\nنوع سفارش را انتخاب کن:", reply_markup=ui.orders_keyboard())
         return
-    if action == "list" and len(parts) == 4 and parts[2] in ORDER_CATEGORIES:
+    if action == "list" and len(parts) == 4 and parts[2] == "processing":
         category = parts[2]
         try:
             page = int(parts[3])
@@ -1927,7 +1886,7 @@ async def orders_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         text = f"📦 {ORDER_CATEGORIES[category]} · صفحهٔ {page + 1}\n\n" + ("سفارشی پیدا نشد." if not rows else "برای مشاهدهٔ جزئیات، یک سفارش را انتخاب کن.")
         await _edit_query_screen(query, text, reply_markup=InlineKeyboardMarkup(buttons))
         return
-    if action == "detail" and len(parts) == 5 and parts[2] in ORDER_CATEGORIES:
+    if action == "detail" and len(parts) == 5 and parts[2] == "processing":
         category, order_id = parts[2], parts[3]
         try:
             page = int(parts[4])
@@ -1973,8 +1932,6 @@ async def orders_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
                 text += "\n\nبرای این سفارش لینک ذخیره نشده؛ فایل ممکن است مستقیماً در چت ارسال شده باشد."
         if category == "content" and order['status'] == "completed":
             buttons.append([ui.button("⬇️ دریافت خروجی", f"content:result:{order_id}", style="primary")])
-        if category == "processing" and order['status'] == "completed" and order['kind'] != "caption_video":
-            buttons.append([ui.button("📝 خروجی‌های تکمیلی و ویرایش", f"content:job:{order_id}")])
         buttons.append([ui.button("‹ بازگشت", f"orders:list:{category}:{page}")])
         await query.answer()
         await _edit_query_screen(query, text, reply_markup=InlineKeyboardMarkup(buttons), disable_web_page_preview=True)
@@ -3245,7 +3202,6 @@ async def post_init(application: Application) -> None:
     from telegram import BotCommand
     await application.bot.set_my_commands([
         BotCommand("start", "شروع و راهنمای ربات"),
-        BotCommand("team", "حساب تیمی و راهنمای آن"),
         BotCommand("pricing", "تعرفه‌ها به‌ازای هر دقیقه"),
         BotCommand("history", "گردش کیف پول"),
         BotCommand("balance", "موجودی کیف پول"),
@@ -3282,14 +3238,6 @@ def main() -> None:
     application.bot_data["settings"] = settings
     register_video_captions(application)
     application.add_handler(CommandHandler("start", start))
-    application.add_handler(CommandHandler("team", team_command))
-    application.add_handler(CommandHandler("team_create", team_create))
-    application.add_handler(CommandHandler("team_invite", team_invite))
-    application.add_handler(CommandHandler("team_join", team_join))
-    application.add_handler(CommandHandler("team_leave", team_leave))
-    application.add_handler(CommandHandler("team_remove", team_remove))
-    application.add_handler(CommandHandler("team_glossary", team_glossary))
-    application.add_handler(CommandHandler("team_report", team_report))
     application.add_handler(CommandHandler("pricing", pricing))
     application.add_handler(CommandHandler("history", history))
     application.add_handler(CommandHandler("balance", balance))
@@ -3305,14 +3253,11 @@ def main() -> None:
     application.add_handler(CallbackQueryHandler(terms_callback, pattern=r"^terms:"))
     application.add_handler(CallbackQueryHandler(menu_callback, pattern=r"^menu:"))
     application.add_handler(CallbackQueryHandler(orders_callback, pattern=r"^orders:"))
-    application.add_handler(CallbackQueryHandler(content_callback, pattern=r"^content:"))
-    application.add_handler(CallbackQueryHandler(image_callback, pattern=r"^image:"))
+    application.add_handler(CallbackQueryHandler(_removed_feature_callback, pattern=r"^(?:content|image|dl|team):"))
     application.add_handler(CallbackQueryHandler(packages_callback, pattern=r"^packs:"))
-    application.add_handler(CallbackQueryHandler(team_join_callback, pattern=r"^team:join:"))
     application.add_handler(CallbackQueryHandler(choose_mode, pattern=r"^mode:"))
     application.add_handler(CallbackQueryHandler(cancel_job_callback, pattern=r"^job_cancel:"))
     application.add_handler(CallbackQueryHandler(choose_dub_mode, pattern=r"^dubmode:"))
-    application.add_handler(CallbackQueryHandler(choose_download, pattern=r"^dl:"))
     application.add_handler(CallbackQueryHandler(choose_quality, pattern=r"^quality:"))
     application.add_handler(CallbackQueryHandler(confirm_order, pattern=r"^confirm:"))
     application.add_handler(CallbackQueryHandler(cancel_order_callback, pattern=r"^order_cancel:"))

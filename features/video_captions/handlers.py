@@ -74,7 +74,7 @@ async def callback(update, context):
             item["font"] = "vazirmatn"
         if item.get("font_size") not in FONT_SIZE_LABELS:
             item["font_size"] = "medium"
-    if action == "mode" and len(parts) == 4 and parts[3] in {"caption", "color", "both"}:
+    if action == "mode" and len(parts) == 4 and parts[3] == "caption":
         item["mode"] = parts[3]
         for key in ("language", "color", "font", "font_size", "amount", "package_id"):
             item.pop(key, None)
@@ -132,7 +132,7 @@ async def callback(update, context):
         pending.pop(user.id, None)
         await query.answer()
         await query.edit_message_text("درخواست لغو شد.", reply_markup=ui.back_keyboard("menu:services"))
-    elif action == "confirm" and item.get("amount") and item.get("mode") and item.get("color") and item.get("language") in {"fa", "en", "auto"} and (item.get("mode") == "color" or (item.get("font") in FONT_FILES and item.get("font_size") in FONT_SIZE_LABELS)):
+    elif action == "confirm" and item.get("amount") and item.get("mode") == "caption" and item.get("color") and item.get("language") in {"fa", "en", "auto"} and item.get("font") in FONT_FILES and item.get("font_size") in FONT_SIZE_LABELS:
         package_id = parts[3] if len(parts) == 4 else None
         if len(parts) not in {3, 4} or (package_id and package_id != item.get("package_id")):
             await query.answer("روش پرداخت معتبر نیست.", show_alert=True)
@@ -247,8 +247,6 @@ async def receive_video(update, context):
     item.update(stage="options", token=token, file_id=video.file_id, duration=duration)
     await message.reply_text("نوع پردازش را انتخاب کن:", reply_markup=InlineKeyboardMarkup([
         [ui.button("📝 فقط زیرنویس", f"vclip:mode:{token}:caption")],
-        [ui.button("🎨 فقط رنگ", f"vclip:mode:{token}:color")],
-        [ui.button("🎬 هر دو", f"vclip:mode:{token}:both", style="primary")],
         [ui.button("✕ لغو", f"vclip:cancel:{token}")],
     ]))
     raise ApplicationHandlerStop

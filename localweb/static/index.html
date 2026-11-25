@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="fa" dir="rtl">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="session-token" content="__SESSION_TOKEN__">
+  <title>YT Local · استودیوی محلی</title><link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<main class="shell">
+  <aside class="sidebar">
+    <div class="brand"><span class="brand-mark">▶</span><div><b>YT Local</b><small>استودیوی شخصی شما</small></div></div>
+    <div class="nav-title">فضای کار</div>
+    <nav><button class="nav active" data-page="workspace">◈ <span>پردازش</span></button><button class="nav" data-page="models">◎ <span>مدل‌های محلی</span></button><button class="nav" data-page="settings">⚙ <span>تنظیمات</span></button></nav>
+    <div class="local-note"><span class="dot"></span><div><b>در حال اجرا روی دستگاه شما</b><small>سرویس در همین کامپیوتر فعال است.</small></div></div>
+  </aside>
+  <section class="content">
+    <header><div><span class="eyebrow">استودیوی پردازش محتوا</span><h1 id="page-title">کار جدید</h1><p id="page-subtitle">از ایده تا خروجی، همه چیز در یک فضای شخصی.</p></div><span class="badge"><span class="dot"></span> اجرای محلی</span></header>
+    <section id="workspace" class="page active">
+      <div class="card hero"><div class="card-head"><div><h2>پردازش جدید</h2><p>نوع کار را انتخاب کنید و ورودی را وارد کنید.</p></div><span class="card-icon">✦</span></div>
+        <label for="kind">نوع عملیات</label><select id="kind">
+          <option value="subtitle">زیرنویس فارسی از لینک</option><option value="dub">دوبلهٔ ساده از لینک</option><option value="smart_dub">دوبلهٔ هوشمند از لینک</option>
+          <option value="video">دانلود ویدیو</option><option value="audio">دانلود صدا</option><option value="media">دانلود مدیای اینستاگرام</option><option value="profile">عکس پروفایل اینستاگرام</option>
+          <option value="summary">جزوه از فایل SRT</option><option value="social">محتوای شبکه‌های اجتماعی از SRT</option><option value="image">ساخت یا ویرایش تصویر</option>
+          <option value="local_caption">زیرنویس ویدیوی محلی</option><option value="local_color">اصلاح رنگ ویدیوی محلی</option><option value="local_both">زیرنویس و اصلاح رنگ ویدیوی محلی</option>
+        </select>
+        <label for="source">ورودی</label><textarea id="source" rows="3" placeholder="لینک، مسیر فایل محلی یا توضیح تصویر را اینجا وارد کنید"></textarea>
+        <p class="hint">برای فایل محلی، مسیر کامل فایل را وارد کنید. هزینهٔ API از حساب خودتان محاسبه می‌شود.</p>
+        <div class="actions"><button id="start" class="primary">شروع پردازش <span>←</span></button><button id="cancel" class="secondary">لغو عملیات</button></div>
+      </div>
+      <div class="card status-card"><div class="status-top"><div><span class="eyebrow">وضعیت عملیات</span><h3 id="status">آماده</h3></div><span id="state-pill" class="state">در انتظار</span></div><div class="progress"><span id="progress-bar"></span></div><small>مسیر خروجی پس از پایان عملیات اینجا نمایش داده می‌شود.</small></div>
+    </section>
+    <section id="models" class="page"><div class="card"><div class="card-head"><div><h2>مدل گفتار محلی</h2><p>مدل Whisper چندزبانه را انتخاب و داخل برنامه دانلود کنید.</p></div><span class="card-icon">◎</span></div><label for="model">اندازهٔ مدل</label><select id="model"><option>tiny</option><option>base</option><option selected>small</option><option>medium</option><option>large-v3</option></select><p class="hint">مدل‌های بزرگ‌تر به فضای ذخیره‌سازی و حافظهٔ بیشتری نیاز دارند. پس از دانلود، رونویسی محلی بدون اینترنت انجام می‌شود.</p><button id="download-model" class="primary">دانلود و انتخاب مدل <span>↓</span></button><p id="model-status" class="hint"></p></div></section>
+    <section id="settings" class="page"><form id="settings-form" class="card"><div class="card-head"><div><h2>تنظیمات برنامه</h2><p>تنظیمات روی دستگاه شما ذخیره می‌شوند.</p></div><span class="card-icon">⚙</span></div><div id="settings-fields" class="form-grid"></div><div class="key-section"><h3>کلیدهای API</h3><p>کلیدها در مخزن امن سیستم ذخیره می‌شوند. خالی گذاشتن یعنی بدون تغییر.</p><div class="form-grid"><div><label for="key-openai">OpenAI API Key</label><input id="key-openai" type="password" autocomplete="off"></div><div><label for="key-openrouter">OpenRouter API Key</label><input id="key-openrouter" type="password" autocomplete="off"></div></div></div><button class="primary" type="submit">ذخیرهٔ تنظیمات <span>✓</span></button><p id="settings-status" class="hint"></p></form></section>
+    <footer>YT LOCAL <span>·</span> پردازش شخصی روی دستگاه شما</footer>
+  </section>
+</main><script src="/app.js" defer></script>
+</body></html>

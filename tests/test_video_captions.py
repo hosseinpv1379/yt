@@ -95,6 +95,17 @@ class TranscriptionTests(unittest.TestCase):
         self.assertIn("Vazirmatn", caption)
         self.assertTrue(any("زبان انتخاب‌شده: فارسی" in line for line in progress))
 
+    def test_caption_without_speech_does_not_start_color_processing(self):
+        meta = {"width": 640, "height": 360, "duration": 3.0, "audio": True}
+        with tempfile.TemporaryDirectory() as tmp, \
+                patch("features.video_captions.pipeline.probe", return_value=meta), \
+                patch("features.video_captions.pipeline.transcribe", return_value=([], "fa")), \
+                patch("features.video_captions.pipeline.subprocess.run") as run:
+            root = Path(tmp)
+            with self.assertRaisesRegex(ValueError, "گفتاری"):
+                render(root / "in.mp4", root / "out.mp4", "caption", "yellow", "/model", root, threading.Event(), lambda _: None)
+            run.assert_not_called()
+
     @unittest.skipUnless(importlib.util.find_spec("av") and importlib.util.find_spec("faster_whisper"),
                          "faster-whisper and PyAV are not installed")
     def test_faster_whisper_decodes_real_wav(self):

@@ -1,6 +1,10 @@
 .env
 .venv/
 .venv-graphify/
+.venv-localweb/
+.localweb-tools/
+.localweb-python/
+.localweb-cache/
 graphify-out/cache/
 graphify-out/20??-??-??/
 graphify-out/.graphify_root

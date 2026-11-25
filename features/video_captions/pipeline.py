@@ -102,6 +102,7 @@ def probe(path: Path, inspect_frame_timing: bool = False) -> dict:
         pass
     metadata = {"duration": duration, "width": width, "height": height,
                 "audio": bool(audio_streams), "source_pts_alignment_mismatch": pts_alignment_mismatch,
+                "audio_codec": audio_streams[0].get("codec_name") if audio_streams else None,
                 "video_time_base": video.get("time_base")}
     if inspect_frame_timing:
         # Uploaded clips are capped at 90 seconds and 20 MB. Scan every video
@@ -132,21 +133,21 @@ def render(source: Path, output: Path, mode: str, color: str, model_path: str,
         progress("در حال ساخت زیرنویس…")
         write_ass(words, ass_path, meta["width"], meta["height"], language or "en", color, font, font_size)
     elif mode in {"caption", "both"}:
+        if not color_requested:
+            raise ValueError("گفتاری برای ساخت زیرنویس پیدا نشد.")
         progress("گفتاری پیدا نشد؛ فقط اصلاح رنگ انجام می‌شود.")
         mode = "color"
-        if not color_requested:
-            progress("در حال بررسی زمان‌بندی فریم‌ها…")
-            meta["variable_frame_rate"] = _variable_frame_timing(source, meta.get("video_time_base"))
-            color_requested = True
     filters = ["pad=ceil(iw/2)*2:ceil(ih/2)*2"]
     if words:
         escaped_fonts = str(fonts_dir.resolve()).replace("\\", "\\\\").replace(":", "\\:").replace("'", "\\'")
         filters.append(f"ass=captions.ass:fontsdir='{escaped_fonts}'")
-    output_args = ["-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-pix_fmt", "yuv420p",
-                   "-c:a", "aac", "-movflags", "+faststart", str(output)]
+    from app.pipeline import _ffmpeg_preset, _ffmpeg_threads
+    audio_codec = "copy" if meta.get("audio_codec") == "aac" else "aac"
+    output_args = ["-c:v", "libx264", "-preset", _ffmpeg_preset(), "-threads", str(_ffmpeg_threads()), "-crf", "20", "-pix_fmt", "yuv420p",
+                   "-c:a", audio_codec, "-movflags", "+faststart", str(output)]
     progress("در حال اصلاح رنگ و رندر…" if mode in {"color", "both"} else "در حال رندر…")
     if mode == "caption":
-        cmd = ["ffmpeg", "-hide_banner", "-loglevel", "error", "-y", "-i", str(source)]
+        cmd = ["ffmpeg", "-hide_banner", "-loglevel", "error", "-threads", str(_ffmpeg_threads()), "-filter_threads", str(_ffmpeg_threads()), "-y", "-i", str(source)]
         if filters:
             cmd += ["-vf", ",".join(filters)]
         cmd += ["-fps_mode", "passthrough"]

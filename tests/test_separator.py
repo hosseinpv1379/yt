@@ -34,4 +34,7 @@ class SeparatorTests(unittest.TestCase):
                 self.assertFalse((job / "separator-work").exists())
                 with self.assertRaises(ValueError):
                     server.separate(job.name, "../outside.wav")
+            with patch.object(server, "ROOT", root / "other"), patch.object(server, "run", side_effect=run):
+                server.separate(job.name, source.name, root=root)
+                self.assertTrue((job / "dub-background.wav").is_file())
 
