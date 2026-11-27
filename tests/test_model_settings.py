@@ -48,7 +48,7 @@ class ModelSettingsTests(unittest.IsolatedAsyncioTestCase):
         db = MemoryDB()
         state = BotState(settings(), db)
         state.api_provider = 'openrouter'
-        query = SimpleNamespace(data='admin:setmodel:s2', answer=AsyncMock(), edit_message_text=AsyncMock())
+        query = SimpleNamespace(data='admin:setmodel:s2', answer=AsyncMock(), edit_message_text=AsyncMock(), message=None)
         context = SimpleNamespace(application=SimpleNamespace(bot_data={'state': state}))
         update = SimpleNamespace(callback_query=query, effective_user=SimpleNamespace(id=1))
         await admin_callback(update, context)
@@ -78,11 +78,15 @@ class ModelSettingsTests(unittest.IsolatedAsyncioTestCase):
             transcribe = Mock(return_value=([{'start': 0, 'end': 2, 'text': 'hello'}], 0.1))
             translate = Mock(return_value=([{'start': 0, 'end': 2, 'text': 'سلام'}], 0.2))
             dub = Mock(return_value=(root / 'dub.wav', None, 0.0))
+            bed = root / 'dub-background.wav'
             with patch('app.pipeline._download', return_value=(video, '')), patch('app.pipeline._run', side_effect=run), \
                  patch('app.pipeline._openrouter_client', return_value=or_client), patch('app.pipeline.OpenAI', return_value=oa_client), \
                  patch('app.pipeline._transcribe', transcribe), patch('app.pipeline._translate', translate), \
-                 patch('app.pipeline._create_openrouter_dubbed_audio', dub), patch('app.pipeline._mux_dubbed_video'):
-                process_video('https://youtu.be/a', root, config, asyncio.Event(), mode='dub', model_selection=selected)
+                 patch('app.pipeline._media_duration', return_value=2), \
+                 patch('app.pipeline._create_openrouter_dubbed_audio', dub), patch('app.pipeline._mux_dubbed_video') as mux:
+                process_video('https://youtu.be/a', root, config, asyncio.Event(), mode='dub',
+                              model_selection=selected, local_separator=lambda *_: bed.touch())
+            self.assertEqual(mux.call_args.kwargs['background'], bed)
             self.assertIs(transcribe.call_args.args[1], or_client)
             self.assertIs(translate.call_args.args[2], oa_client)
             self.assertIs(dub.call_args.args[3], or_client)

@@ -70,7 +70,6 @@ class Job:
     models: model_catalog.ModelSelection | None = None
     team_glossary: str = ""
     package_minutes: int = 0
-    dub_mode: str = "simple"
     progress_stage: str = "در صف پردازش"
     progress_percent: int = 0
     progress_last_edit: float = 0.0
@@ -134,7 +133,6 @@ class PendingQuality:
     quoted_rate: int = 0
     confirming: bool = False
     download_source: str = ""
-    dub_mode: str = "simple"
     probing: bool = False
     available_heights: list[int] = field(default_factory=list)
     stage: str = "mode"
@@ -329,7 +327,7 @@ ADMIN_SETTING_LABELS = {
     "youtube_cookies_file": "مسیر فایل کوکی یوتیوب",
     "instagram_cookies_file": "مسیر فایل کوکی Instagram",
     "ytdlp_pot_base_url": "نشانی سرویس PO Token یوتیوب",
-    "dub_separator_url": "نشانی سرویس جداسازی صدای دوبلهٔ هوشمند",
+    "dub_separator_url": "نشانی سرویس جداسازی گفتار برای دوبله",
     "download_base_url": "نشانی عمومی لینک دانلود",
     "download_domain": "دامنهٔ HTTPS دانلود",
     "download_ttl_hours": "مدت نگهداری لینک دانلود به ساعت",
@@ -503,7 +501,7 @@ async def receive_link(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     state.pending_by_user[user.id] = token
     await context.application.bot.edit_message_text(
         "🎬 سفارش جدید  ·  ۱ از ۳\n\nکدام خروجی را می‌خواهی؟\n"
-        "📝 زیرنویس: متن فارسی همراه ویدیو\n🎙 دوبله: جایگزینی صدای اصلی با صدای فارسی هوش مصنوعی",
+        "📝 زیرنویس: متن فارسی همراه ویدیو\n🎙 دوبله: گفتار فارسی با موسیقی و افکت‌های ویدیو",
         chat_id=selection.chat_id, message_id=selection.message_id,
         reply_markup=ui.mode_keyboard(token),
     )
@@ -579,52 +577,20 @@ async def choose_mode(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         await query.answer("این انتخاب منقضی شده؛ لینک را دوباره بفرست.", show_alert=True)
         return
 
-    await query.answer()
-    selection.mode = mode
     if mode == "dub":
-        selection.stage = "dub_mode"
-        await _edit_query_screen(query,
-            "🎙 روش دوبله را انتخاب کن:\n"
-            "ساده: سریع‌تر.\n"
-            "هوشمند: تلاش می‌کند صدای پس‌زمینه را بهتر حفظ کند.",
-            reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("🎧 دوبلهٔ ساده", callback_data=f"dubmode:{token}:simple")],
-                [InlineKeyboardButton("✨ دوبلهٔ هوشمند", callback_data=f"dubmode:{token}:smart")],
-                [InlineKeyboardButton("↩️ بازگشت", callback_data=f"order_back:{token}")],
-                [ui.button("✕ لغو سفارش", f"order_cancel:{token}", style="danger")],
-            ]),
-        )
-        return
-    selection.stage = "probing"
-    await _probe_order(query, context, selection, token)
-
-
-async def choose_dub_mode(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    query, user = update.callback_query, update.effective_user
-    if not query or not user:
-        return
-    parts = (query.data or "").split(":")
-    selection = _state(context).pending_quality.get(parts[1]) if len(parts) == 3 else None
-    if (not selection or selection.user_id != user.id
-            or _state(context).pending_by_user.get(user.id) != parts[1]
-            or selection.stage != "dub_mode" or selection.mode != "dub"
-            or selection.confirming or selection.probing
-            or parts[2] not in {"simple", "smart"}):
-        await query.answer("این انتخاب دیگر معتبر نیست.", show_alert=True)
-        return
-    selection.stage = "checking_dub_mode"
-    if parts[2] == "smart" and not await _separator_available(_state(context).settings):
-        selection.stage = "dub_mode"
-        await query.answer("دوبلهٔ هوشمند فعلاً در دسترس نیست؛ دوبلهٔ ساده را انتخاب کن یا با پشتیبانی تماس بگیر.", show_alert=True)
-        return
-    if (_state(context).pending_quality.get(parts[1]) is not selection
-            or _state(context).pending_by_user.get(user.id) != parts[1]):
-        await query.answer("این سفارش لغو شده است.", show_alert=True)
-        return
-    selection.dub_mode = parts[2]
+        selection.stage = "checking_separator"
+        available = await _separator_available(state.settings)
+        if state.pending_quality.get(token) is not selection:
+            await query.answer("این سفارش لغو شده است.", show_alert=True)
+            return
+        if not available:
+            selection.stage = "mode"
+            await query.answer("سرویس جداسازی گفتار فعلاً در دسترس نیست.", show_alert=True)
+            return
+    selection.mode = mode
     selection.stage = "probing"
     await query.answer()
-    await _probe_order(query, context, selection, parts[1])
+    await _probe_order(query, context, selection, token)
 
 
 async def _separator_available(settings: Settings) -> bool:
@@ -646,7 +612,8 @@ async def _probe_order(query, context, selection: PendingQuality, token: str) ->
     selection.probing = True
     selection.stage = "probing"
     try:
-        await _edit_query_screen(query, _progress_text("بررسی کیفیت‌های موجود", 0))
+        await _edit_query_screen(query, _progress_text("بررسی کیفیت‌های موجود", 0),
+                                 reply_markup=ui.cancel_keyboard(f"order_cancel:{token}"))
         heights, duration, title = await asyncio.to_thread(
             get_video_details_with_title, selection.url, state.settings
         )
@@ -681,7 +648,7 @@ async def _probe_order(query, context, selection: PendingQuality, token: str) ->
     selection.available_heights = heights
     selection.stage = "quality"
 
-    mode_label = "زیرنویس فارسی" if selection.mode == "subtitle" else ("دوبلهٔ هوشمند" if selection.dub_mode == "smart" else "دوبلهٔ ساده")
+    mode_label = "زیرنویس فارسی" if selection.mode == "subtitle" else "دوبلهٔ فارسی"
     await context.application.bot.edit_message_text(
         f"🎬 سفارش جدید  ·  ۲ از ۳\n\nخروجی: {mode_label}\nکیفیت ویدیو را انتخاب کن:",
         chat_id=selection.chat_id, message_id=selection.message_id,
@@ -752,7 +719,7 @@ async def choose_quality(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     selection.quoted_rate = rate
     selection.stage = "payment"
     quality = "خودکار" if selected_height is None else f"{selected_height}p"
-    mode_label = "زیرنویس فارسی" if mode == "subtitle" else ("دوبلهٔ هوشمند" if selection.dub_mode == "smart" else "دوبلهٔ ساده")
+    mode_label = "زیرنویس فارسی" if mode == "subtitle" else "دوبلهٔ فارسی"
     package = next((p for p in packages if p["mode"] == mode and p["minutes"] >= minutes), None)
     package_note = f"\nبستهٔ قابل استفاده: {package['minutes']} دقیقه" if package else ""
     await query.answer()
@@ -786,10 +753,10 @@ async def confirm_order(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     selection.confirming = True
     selection.stage = "confirming"
     mode = selection.mode
-    if mode == "dub" and selection.dub_mode == "smart" and not await _separator_available(state.settings):
+    if mode == "dub" and not await _separator_available(state.settings):
         selection.confirming = False
         selection.stage = "payment"
-        await query.answer("دوبلهٔ هوشمند فعلاً در دسترس نیست؛ هزینه‌ای کسر نشد.", show_alert=True)
+        await query.answer("سرویس جداسازی گفتار در دسترس نیست؛ هزینه‌ای کسر نشد.", show_alert=True)
         return
     selected_height = selection.selected_height
     rate = selection.quoted_rate
@@ -855,7 +822,6 @@ async def confirm_order(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         can_use_draft=True, billable_minutes=minutes,
         billed_amount_toman=0 if package_id else amount, models=models, team_glossary=team_glossary,
         package_minutes=minutes if package_id else 0,
-        dub_mode=selection.dub_mode,
     )
     state.active[user.id] = job
     await state.queue.put(job)
@@ -879,7 +845,7 @@ async def back_to_mode(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     selection = _state(context).pending_quality.get(token)
     if (not selection or selection.user_id != user.id
             or _state(context).pending_by_user.get(user.id) != token
-            or selection.stage not in {"quality", "dub_mode"}
+            or selection.stage != "quality"
             or selection.confirming or selection.probing):
         await query.answer("این سفارش دیگر فعال نیست.", show_alert=True)
         return
@@ -1388,7 +1354,7 @@ async def admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     await _show_admin_panel(message.reply_text, state, user.id)
 
 
-def _bounded_percent(value: str, default: int = 10) -> int:
+def _bounded_percent(value: str, default: int = 100) -> int:
     try:
         return max(0, min(100, int(value)))
     except (TypeError, ValueError):
@@ -1399,15 +1365,15 @@ async def _show_admin_panel(send, state: BotState, user_id: int) -> None:
     stats = await state.database.get_business_stats()
     subtitle = int(await state.database.get_setting("price_subtitle_toman_per_minute", str(state.settings.default_subtitle_price_toman_per_minute)))
     dub = int(await state.database.get_setting("price_dub_toman_per_minute", str(state.settings.default_dub_price_toman_per_minute)))
-    original_audio_percent = _bounded_percent(
-        await state.database.get_setting("dub_original_audio_percent", "10")
+    background_percent = _bounded_percent(
+        await state.database.get_setting("dub_background_audio_percent", "100")
     )
     api_ready = bool(state.settings.openai_api_key or state.settings.openrouter_api_key)
     backup_interval = int(await state.database.get_setting("auto_backup_interval_hours", "0"))
     keyboard = InlineKeyboardMarkup([
         [InlineKeyboardButton("✏️ نرخ زیرنویس", callback_data="admin:edit:subtitle"),
          InlineKeyboardButton("✏️ نرخ دوبله", callback_data="admin:edit:dub")],
-        [InlineKeyboardButton(f"🔊 صدای اصلی دوبله: {original_audio_percent}%", callback_data="admin:dub-audio-level")],
+        [InlineKeyboardButton(f"🔊 پس‌زمینهٔ دوبله: {background_percent}%", callback_data="admin:dub-audio-level")],
         [InlineKeyboardButton("➕ شارژ کاربر", callback_data="admin:wallet:credit"),
          InlineKeyboardButton("➖ کسر از کیف پول", callback_data="admin:wallet:debit")],
         [InlineKeyboardButton("👤 بررسی کاربر", callback_data="admin:wallet:lookup")],
@@ -1708,14 +1674,14 @@ async def admin_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         return
     if action == ["admin", "dub-audio-level"]:
         current = _bounded_percent(
-            await state.database.get_setting("dub_original_audio_percent", "10")
+            await state.database.get_setting("dub_background_audio_percent", "100")
         )
-        flow = _begin_admin_input(state, user.id, "dub_original_audio_percent")
+        flow = _begin_admin_input(state, user.id, "dub_background_audio_percent")
         await query.answer()
         await _edit_query_screen(
             query,
-            f"🔊 صدای اصلی در دوبله اکنون {current}% است.\n"
-            "درصد دلخواه را از ۰ تا ۱۰۰ بفرست؛ مقدار پیش‌فرض ۱۰٪ است.",
+            f"🔊 شدت موسیقی و افکت‌ها در دوبله اکنون {current}% است.\n"
+            "درصد دلخواه را از ۰ تا ۱۰۰ بفرست. پیش‌فرض ۱۰۰٪ است.",
             reply_markup=_flow_keyboard(flow, include_back=False),
         )
         return
@@ -2002,7 +1968,7 @@ async def _save_admin_value(update: Update, state: BotState, application: Applic
             )
         await _return_to_admin_panel(message.reply_text, state, user.id, "\n".join(lines))
         return
-    if key == "dub_original_audio_percent":
+    if key == "dub_background_audio_percent":
         digits = str.maketrans("۰۱۲۳۴۵۶۷۸۹٠١٢٣٤٥٦٧٨٩", "01234567890123456789")
         raw = message.text.strip().translate(digits)
         try:
@@ -2018,7 +1984,7 @@ async def _save_admin_value(update: Update, state: BotState, application: Applic
             message.reply_text,
             state,
             user.id,
-            f"✅ صدای اصلی برای دوبله‌های بعدی روی {percent}% تنظیم شد.",
+            f"✅ شدت موسیقی و افکت‌ها برای دوبله‌های بعدی روی {percent}% تنظیم شد.",
         )
         return
     if key in {"credit", "debit"}:
@@ -2184,8 +2150,7 @@ async def menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
             current_stage = state.current_stage(user.id)
             stage_label = {
                 "mode": "انتخاب نوع خروجی",
-                "dub_mode": "انتخاب روش دوبله",
-                "checking_dub_mode": "بررسی روش دوبله",
+                "checking_separator": "بررسی سرویس جداسازی گفتار",
                 "probing": "بررسی ویدیو",
                 "quality": "انتخاب کیفیت",
                 "pricing": "محاسبهٔ هزینه",
@@ -3488,10 +3453,10 @@ async def worker(application: Application) -> None:
 
             progress_task = asyncio.create_task(_progress_updater(application, job, progress_queue))
             await _publish_progress(application, job, "دانلود ویدیو", 0)
-            original_audio_percent = 10
+            background_percent = 100
             if job.mode == "dub":
-                original_audio_percent = _bounded_percent(
-                    await state.database.get_setting("dub_original_audio_percent", "10")
+                background_percent = _bounded_percent(
+                    await state.database.get_setting("dub_background_audio_percent", "100")
                 )
             output, srt, vtt, costs = await asyncio.to_thread(
                 process_video,
@@ -3505,8 +3470,7 @@ async def worker(application: Application) -> None:
                 job.api_provider,
                 job.models,
                 job.team_glossary,
-                job.dub_mode,
-                original_audio_percent,
+                background_percent=background_percent,
             )
             subtitle_text = srt.read_text(encoding="utf-8")
             if job.cancel_event.is_set():
@@ -3580,7 +3544,7 @@ async def worker(application: Application) -> None:
                         video=video_file,
                         supports_streaming=True,
                         caption=(
-                            "ویدیو با دوبلهٔ فارسی؛ صدای اصلی در پس‌زمینه حفظ شده و ممکن است دیالوگ اصلی هم شنیده شود."
+                            "ویدیو با دوبلهٔ فارسی و پس‌زمینهٔ جداشدهٔ ویدیو"
                             if job.mode == "dub"
                             else "ویدیو با زیرنویس فارسی"
                         ),
@@ -4047,7 +4011,6 @@ def main() -> None:
     application.add_handler(CallbackQueryHandler(packages_callback, pattern=r"^packs:"))
     application.add_handler(CallbackQueryHandler(choose_mode, pattern=r"^mode:"))
     application.add_handler(CallbackQueryHandler(cancel_job_callback, pattern=r"^job_cancel:"))
-    application.add_handler(CallbackQueryHandler(choose_dub_mode, pattern=r"^dubmode:"))
     application.add_handler(CallbackQueryHandler(choose_quality, pattern=r"^quality:"))
     application.add_handler(CallbackQueryHandler(confirm_order, pattern=r"^confirm:"))
     application.add_handler(CallbackQueryHandler(cancel_order_callback, pattern=r"^order_cancel:"))

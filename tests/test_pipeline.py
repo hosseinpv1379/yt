@@ -116,9 +116,9 @@ class PipelineTests(unittest.TestCase):
         self.assertAlmostEqual(cost, 0.000045)
 
     def test_fallback_accelerates_best_complete_audio_without_overlap(self):
-        generate = Mock(side_effect=[(AudioSegment.silent(duration=1700, frame_rate=24000), 0.1),
-                                     (AudioSegment.silent(duration=1800, frame_rate=24000), 0.1),
-                                     (AudioSegment.silent(duration=1750, frame_rate=24000), 0.1)])
+        generate = Mock(side_effect=[(AudioSegment.silent(duration=1275, frame_rate=24000), 0.1),
+                                     (AudioSegment.silent(duration=1400, frame_rate=24000), 0.1),
+                                     (AudioSegment.silent(duration=1300, frame_rate=24000), 0.1)])
         with tempfile.TemporaryDirectory() as tmp, patch('app.pipeline._shorten_dub_text', return_value=('متن', 0.02)):
             speech, cost, rewrite = _synthesize_fitting_dub('متن', 1000, Path(tmp), 0, generate, object(), 'test')
         self.assertLessEqual(len(speech), 1000)
@@ -129,7 +129,7 @@ class PipelineTests(unittest.TestCase):
     def test_fallback_keeps_audible_end_of_speech(self):
         # A tone at the end represents a final spoken word: it must survive
         # tempo adjustment rather than being cut off at the slot boundary.
-        speech = Sine(440, sample_rate=24000).to_audio_segment(duration=1500) + Sine(1000, sample_rate=24000).to_audio_segment(duration=200)
+        speech = Sine(440, sample_rate=24000).to_audio_segment(duration=1100) + Sine(1000, sample_rate=24000).to_audio_segment(duration=180)
         generate = Mock(return_value=(speech, None))
         with tempfile.TemporaryDirectory() as tmp, patch('app.pipeline._shorten_dub_text', return_value=('متن', None)):
             fitted, _, _ = _synthesize_fitting_dub('متن', 1000, Path(tmp), 0, generate, object(), 'test')

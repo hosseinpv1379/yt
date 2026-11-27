@@ -17,24 +17,13 @@ class SeparatorTests(unittest.TestCase):
             job.mkdir()
             source = job / "source.wav"
             subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", "sine=duration=2", str(source)], check=True)
-            actual_run = server.run
-
-            def run(args):
-                if args[0] == "spleeter":
-                    chunk = Path(args[-1])
-                    stem = Path(args[args.index("-o") + 1]) / chunk.stem / "accompaniment.wav"
-                    stem.parent.mkdir(parents=True)
-                    shutil.copyfile(chunk, stem)
-                else:
-                    actual_run(args)
-
-            with patch.object(server, "ROOT", root), patch.object(server, "run", side_effect=run):
+            with patch.object(server, "ROOT", root), patch.object(server, "write_background", side_effect=shutil.copyfile):
                 server.separate(job.name, source.name)
                 self.assertTrue((job / "dub-background.wav").is_file())
                 self.assertFalse((job / "separator-work").exists())
                 with self.assertRaises(ValueError):
                     server.separate(job.name, "../outside.wav")
-            with patch.object(server, "ROOT", root / "other"), patch.object(server, "run", side_effect=run):
+            with patch.object(server, "ROOT", root / "other"), patch.object(server, "write_background", side_effect=shutil.copyfile):
                 server.separate(job.name, source.name, root=root)
                 self.assertTrue((job / "dub-background.wav").is_file())
 
