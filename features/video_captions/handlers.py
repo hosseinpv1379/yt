@@ -64,7 +64,9 @@ async def callback(update, context):
         state.track_stage(user.id, "video_upload", token, "menu:services")
         await query.answer()
         await query.edit_message_text(
-            "🎬 ویدیوی حداکثر ۹۰ ثانیه و ۲۰ مگابایت را به ربات بفرست.",
+            ui.screen("زیرنویس ویدیوی ارسالی",
+                "ویدیویی تا ۹۰ ثانیه و ۲۰ مگابایت را همین‌جا بفرست.", icon="🎬"),
+            parse_mode="HTML",
             reply_markup=ui.cancel_keyboard(f"vclip:cancel:{token}", "menu:services"),
         )
         return
@@ -91,7 +93,8 @@ async def callback(update, context):
             item["color"] = "yellow"
             await _quote(query, state, user.id, item)
         else:
-            await query.edit_message_text("زبان گفتار ویدیو را انتخاب کن:", reply_markup=InlineKeyboardMarkup([
+            await query.edit_message_text(ui.screen("زبان گفتار", "زبان ویدیو را انتخاب کن:", icon="🌐"),
+                parse_mode="HTML", reply_markup=InlineKeyboardMarkup([
                 [ui.button("🇮🇷 فارسی", f"vclip:lang:{item['token']}:fa", style="primary"),
                  ui.button("🇬🇧 انگلیسی", f"vclip:lang:{item['token']}:en")],
                 [ui.button("🌐 تشخیص خودکار", f"vclip:lang:{item['token']}:auto")],
@@ -104,7 +107,8 @@ async def callback(update, context):
         for key in ("amount", "package_id", "color", "font", "font_size"):
             item.pop(key, None)
         await query.answer()
-        await query.edit_message_text("رنگ کلمهٔ فعال را انتخاب کن:", reply_markup=InlineKeyboardMarkup([
+        await query.edit_message_text(ui.screen("رنگ زیرنویس", "رنگ کلمهٔ فعال را انتخاب کن:", icon="🎨"),
+            parse_mode="HTML", reply_markup=InlineKeyboardMarkup([
             [ui.button("🟡 زرد", f"vclip:color:{item['token']}:yellow"), ui.button("🟢 سبز", f"vclip:color:{item['token']}:green")],
             [ui.button("🔵 آبی", f"vclip:color:{item['token']}:blue"), ui.button("⚪ سفید", f"vclip:color:{item['token']}:white")],
             [ui.button("✕ لغو", f"vclip:cancel:{item['token']}")],
@@ -114,7 +118,8 @@ async def callback(update, context):
         item["stage"] = "font"
         state.track_stage(user.id, "video_font", item["token"], "menu:services")
         await query.answer()
-        await query.edit_message_text("فونت زیرنویس را انتخاب کن:", reply_markup=InlineKeyboardMarkup([
+        await query.edit_message_text(ui.screen("فونت زیرنویس", "فونت دلخواهت را انتخاب کن:", icon="🔤"),
+            parse_mode="HTML", reply_markup=InlineKeyboardMarkup([
             [ui.button(FONT_LABELS["vazirmatn"], f"vclip:font:{item['token']}:vazirmatn"),
              ui.button(FONT_LABELS["noto_sans_arabic"], f"vclip:font:{item['token']}:noto_sans_arabic")],
             [ui.button(FONT_LABELS["noto_naskh_arabic"], f"vclip:font:{item['token']}:noto_naskh_arabic"),
@@ -131,7 +136,8 @@ async def callback(update, context):
         item.pop("amount", None)
         item.pop("package_id", None)
         await query.answer()
-        await query.edit_message_text("اندازهٔ فونت ریلز را انتخاب کن:", reply_markup=InlineKeyboardMarkup([
+        await query.edit_message_text(ui.screen("اندازهٔ زیرنویس", "اندازهٔ مناسب نمایش را انتخاب کن:", icon="🔠"),
+            parse_mode="HTML", reply_markup=InlineKeyboardMarkup([
             [ui.button("کوچک", f"vclip:size:{item['token']}:small"),
              ui.button("متوسط", f"vclip:size:{item['token']}:medium", style="primary")],
             [ui.button("بزرگ", f"vclip:size:{item['token']}:large")],
@@ -145,7 +151,8 @@ async def callback(update, context):
         pending.pop(user.id, None)
         state.clear_stage(user.id, item["token"])
         await query.answer()
-        await query.edit_message_text("درخواست لغو شد.", reply_markup=ui.back_keyboard("menu:services"))
+        await query.edit_message_text(ui.screen("درخواست لغو شد", "هر زمان خواستی می‌توانی دوباره شروع کنی.", icon="✖️"),
+                                      parse_mode="HTML", reply_markup=ui.back_keyboard("menu:services"))
     elif action == "confirm" and item.get("stage") == "payment" and item.get("amount") and item.get("mode") == "caption" and item.get("color") and item.get("language") in {"fa", "en", "auto"} and item.get("font") in FONT_FILES and item.get("font_size") in FONT_SIZE_LABELS:
         package_id = parts[3] if len(parts) == 4 else None
         if len(parts) not in {3, 4} or (package_id and package_id != item.get("package_id")):
@@ -183,13 +190,14 @@ async def callback(update, context):
             item["stage"] = "payment"
             state.track_stage(user.id, "video_payment", item["token"], "menu:services")
             logger.exception("Could not create caption job")
-            await query.edit_message_text("ثبت سفارش ممکن نشد؛ دوباره تلاش کن.")
+            await query.edit_message_text(ui.screen("ثبت سفارش انجام نشد", "لطفاً دوباره تلاش کن.", icon="⚠️"), parse_mode="HTML")
             return
         if balance is None:
             item["confirming"] = False
             item["stage"] = "payment"
             state.track_stage(user.id, "video_payment", item["token"], "menu:services")
-            await query.edit_message_text("بسته معتبر نیست یا موجودی کیف پول کافی نیست؛ دوباره تلاش کن.", reply_markup=ui.wallet_keyboard())
+            await query.edit_message_text(ui.screen("پرداخت انجام نشد", "بسته معتبر نیست یا موجودی کیف پول کافی نیست. دوباره تلاش کن.", icon="⚠️"),
+                                          parse_mode="HTML", reply_markup=ui.wallet_keyboard())
             return
         job = VideoCaptionJob(job_id, user.id, query.message.chat_id, query.message.message_id,
                               item["file_id"], item["mode"], item["color"], item["minutes"],
@@ -203,7 +211,9 @@ async def callback(update, context):
         position = state.queue.qsize() + running + 1
         state.queue.put_nowait(job)
         balance_text = f"باقی‌ماندهٔ بسته: {balance} دقیقه" if package_id else f"موجودی: {balance:,} تومان"
-        await query.edit_message_text(f"✅ سفارش در صف ثبت شد. تعداد کارهای پیش از آن: {position - 1}\n{balance_text}", reply_markup=ui.job_keyboard(job.id))
+        await query.edit_message_text(ui.screen("سفارش ثبت شد",
+            f"جایگاه در صف: {position}\n{balance_text}\n\nپس از آماده‌شدن، خروجی همین‌جا ارسال می‌شود.", icon="✅"),
+            parse_mode="HTML", reply_markup=ui.job_keyboard(job.id))
     else:
         await query.answer("این انتخاب دیگر معتبر نیست.", show_alert=True)
 
@@ -226,8 +236,11 @@ async def _quote(query, state, user_id, item):
         f"\nفونت: {FONT_LABELS[item['font']]} · اندازه: {FONT_SIZE_LABELS[item['font_size']]}"
         if item.get("font") in FONT_LABELS and item.get("font_size") in FONT_SIZE_LABELS else ""
     )
-    await query.edit_message_text(
-        f"🧾 مدت قابل محاسبه: {item['minutes']} دقیقه\nتعرفهٔ زیرنویس: {rate:,} تومان در دقیقه\nهزینه: {item['amount']:,} تومان · موجودی: {balance:,} تومان{language_note}{style_note}\nپردازش گفتار روی سرور انجام می‌شود.",
+    await query.edit_message_text(ui.screen("بررسی زیرنویس و پرداخت",
+        f"مدت قابل محاسبه: {item['minutes']} دقیقه\nتعرفه: {rate:,} تومان در دقیقه\n"
+        f"هزینه: {item['amount']:,} تومان · موجودی: {balance:,} تومان{language_note}{style_note}\n\n"
+        "پردازش گفتار روی سرور انجام می‌شود.", icon="🧾"),
+        parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup([payment,
                                            [ui.button("✕ لغو", f"vclip:cancel:{item['token']}")]]),
     )
@@ -244,11 +257,11 @@ async def receive_video(update, context):
     if not video:
         return
     if not video.file_size or video.file_size > MAX_INPUT:
-        await message.reply_text("ویدیو باید حداکثر ۹۰ ثانیه و ۲۰ مگابایت باشد.")
+        await ui.reply(message, ui.screen("محدودیت ویدیو", "حداکثر مدت ۹۰ ثانیه و حداکثر حجم ۲۰ مگابایت است.", icon="⚠️"), parse_mode="HTML")
         raise ApplicationHandlerStop
     duration = getattr(video, "duration", None)
     if duration is None:
-        await message.reply_text("در حال بررسی مدت فایل ویدیو…")
+        await ui.reply(message, ui.screen("در حال بررسی ویدیو", "لطفاً چند لحظه صبر کن…", icon="⏳"), parse_mode="HTML")
         try:
             with tempfile.TemporaryDirectory(prefix="caption-probe-", dir=context.application.bot_data["state"].settings.work_dir) as temp:
                 source = Path(temp).resolve() / "input"
@@ -261,17 +274,19 @@ async def receive_video(update, context):
                 duration = (await asyncio.to_thread(probe, source))["duration"]
         except Exception as exc:
             logger.exception("Could not inspect uploaded video")
-            await message.reply_text(str(exc) if isinstance(exc, ValueError) else "بررسی فایل ویدیو ممکن نشد؛ دوباره تلاش کن.")
+            detail = str(exc) if isinstance(exc, ValueError) else "بررسی فایل ویدیو ممکن نشد؛ دوباره تلاش کن."
+            await ui.reply(message, ui.screen("بررسی ویدیو ناموفق بود", detail, icon="⚠️"), parse_mode="HTML")
             raise ApplicationHandlerStop
     if duration <= 0 or duration > 90:
-        await message.reply_text("ویدیو باید حداکثر ۹۰ ثانیه و ۲۰ مگابایت باشد.")
+        await ui.reply(message, ui.screen("محدودیت ویدیو", "حداکثر مدت ۹۰ ثانیه و حداکثر حجم ۲۰ مگابایت است.", icon="⚠️"), parse_mode="HTML")
         raise ApplicationHandlerStop
     token = uuid.uuid4().hex[:12]
     item.update(stage="options", token=token, file_id=video.file_id, duration=duration)
     context.application.bot_data["state"].track_stage(
         user.id, "video_options", token, "menu:services"
     )
-    await message.reply_text("نوع پردازش را انتخاب کن:", reply_markup=InlineKeyboardMarkup([
+    await ui.reply(message, ui.screen("نوع پردازش", "برای ویدیو زیرنویس فارسی بساز.", icon="📝"),
+        parse_mode="HTML", reply_markup=InlineKeyboardMarkup([
         [ui.button("📝 فقط زیرنویس", f"vclip:mode:{token}:caption")],
         [ui.button("✕ لغو", f"vclip:cancel:{token}")],
     ]))
@@ -288,7 +303,8 @@ async def run_job(application, state, job):
     async def update_progress():
         while (text := await progress_queue.get()) is not None:
             try:
-                await application.bot.edit_message_text(text, chat_id=job.chat_id, message_id=job.message_id)
+                await application.bot.edit_message_text(ui.plain_screen(text), parse_mode="HTML",
+                                                       chat_id=job.chat_id, message_id=job.message_id)
             except Exception:
                 logger.exception("Could not update caption job progress")
 
@@ -345,7 +361,11 @@ async def run_job(application, state, job):
                 token = await asyncio.to_thread(publish_download, output, Path(state.settings.download_dir), state.settings.download_ttl_hours)
                 await state.database.add_download(job.id, token, "video-fa.mp4", output.stat().st_size,
                                                   datetime.now(UTC) + timedelta(hours=state.settings.download_ttl_hours))
-                await application.bot.send_message(job.chat_id, f"ویدیو آماده است: {state.settings.download_base_url}/{token}.mp4")
+                await application.bot.send_message(
+                    job.chat_id,
+                    ui.screen("ویدیو آماده است", f"لینک دریافت: {state.settings.download_base_url}/{token}.mp4", icon="⬇️"),
+                    parse_mode="HTML", disable_web_page_preview=True,
+                )
             else:
                 raise ValueError("ویدیو برای ارسال تلگرام بزرگ است و لینک دانلود تنظیم نشده است.")
             delivered = True
@@ -362,7 +382,8 @@ async def run_job(application, state, job):
             result_note += "اصلاح رنگ به‌دلیل نرخ فریم متغیر یا نامشخص انجام نشد تا هم‌زمانی صدای اصلی و تصویر حفظ شود."
             if has_words:
                 result_note += " زیرنویس با زمان‌بندی اصلی درج شد."
-        await application.bot.edit_message_text(f"✅ ویدیوی پردازش‌شده ارسال شد.\n{result_note}", chat_id=job.chat_id, message_id=job.message_id)
+        await application.bot.edit_message_text(ui.screen("ویدیوی پردازش‌شده آماده است", result_note, icon="✅"),
+            parse_mode="HTML", chat_id=job.chat_id, message_id=job.message_id)
     except Exception as exc:
         logger.exception("Caption job %s failed", job.id)
         try:
@@ -373,7 +394,9 @@ async def run_job(application, state, job):
                 refund = await state.database.refund_job_wallet(job.id)
                 note = ((f"{refund['package_minutes']} دقیقه به بسته برگشت." if refund.get("package_minutes") else "هزینه به کیف پول برگشت.")
                         if refund and refund.get("refunded") else "برای پیگیری با پشتیبانی تماس بگیر.")
-                await application.bot.send_message(job.chat_id, f"پردازش کامل نشد. {str(exc) if isinstance(exc, ValueError) else ''} {note}")
+                detail = str(exc) if isinstance(exc, ValueError) else "پردازش به پایان نرسید."
+                await application.bot.send_message(job.chat_id,
+                    ui.screen("پردازش ناموفق بود", f"{detail}\n{note}", icon="⚠️"), parse_mode="HTML")
         except Exception:
             logger.exception("Could not refund caption job %s", job.id)
     finally:

@@ -1,9 +1,62 @@
-"""Reusable Telegram screens and button styles for the customer journey."""
+"""Reusable Telegram screens, safe HTML formatting, and button styles."""
+from html import escape, unescape
+import re
+
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
 
+def html_escape(value: object) -> str:
+    """Escape dynamic values before placing them in a Telegram HTML message."""
+    return escape(str(value), quote=False)
+
+
+def screen(title: str, body: str = "", *, icon: str = "") -> str:
+    """Build a consistent, safe HTML screen from plain text."""
+    heading = f"{icon} <b>{html_escape(title)}</b>" if icon else f"<b>{html_escape(title)}</b>"
+    return f"{heading}\n\n{html_escape(body)}" if body else heading
+
+
+def plain_screen(text: str) -> str:
+    """Format an ordinary screen and escape every part before HTML parsing."""
+    title, separator, body = text.strip().partition("\n")
+    if not title:
+        return html_escape(text)
+    return screen(title.strip(), body.strip() if separator else "")
+
+
+async def reply(message, text: str, **kwargs):
+    """Send a safely formatted screen for plain replies and forms."""
+    if kwargs.get("parse_mode") is None:
+        text = plain_screen(text)
+        kwargs["parse_mode"] = "HTML"
+    return await message.reply_text(text, **kwargs)
+
+
+def truncate_text(text: str, max_units: int, suffix: str = "…") -> str:
+    """Truncate text by Telegram's UTF-16 limit without splitting a character."""
+    if len(text.encode("utf-16-le")) // 2 <= max_units:
+        return text
+    budget = max(0, max_units - len(suffix.encode("utf-16-le")) // 2)
+    output = []
+    units = 0
+    for char in text:
+        char_units = len(char.encode("utf-16-le")) // 2
+        if units + char_units > budget:
+            break
+        output.append(char)
+        units += char_units
+    return "".join(output).rstrip() + suffix
+
+
+def plain_from_html(text: str) -> str:
+    """Turn our small HTML subset back into readable text for length fallbacks."""
+    return unescape(re.sub(r"</?(?:b|i|u|s|code|pre|blockquote)>", "", text))
+
+
 def button(text: str, action: str, *, style: str | None = None) -> InlineKeyboardButton:
-    return InlineKeyboardButton(text, callback_data=action, style=style)
+    if not action or len(action.encode("utf-8")) > 64:
+        raise ValueError("Telegram callback data must contain 1 to 64 bytes")
+    return InlineKeyboardButton(truncate_text(text, 64), callback_data=action, style=style)
 
 
 def home_keyboard() -> InlineKeyboardMarkup:
@@ -46,9 +99,22 @@ def home_text(balance: int) -> str:
     return (
         '🎬 <b>ویدیو فارسی</b>\n'
         'زیرنویس و دوبلهٔ ویدیو\n\n'
-        'لینک را بفرست یا از منو انتخاب کن.\n'
-        f'👛 موجودی: <b>{balance:,} تومان</b>'
+        'برای شروع، لینک ویدیو را بفرست یا یکی از گزینه‌های زیر را انتخاب کن.\n'
+        f'👛 موجودی کیف پول: <b>{balance:,} تومان</b>'
     )
+
+
+def pricing_text(subtitle: int, dub: int) -> str:
+    return (
+        "💎 <b>تعرفهٔ خدمات</b>\n\n"
+        f"📝 زیرنویس فارسی · <b>{subtitle:,} تومان</b> به‌ازای هر دقیقه\n"
+        f"🎙 دوبلهٔ فارسی · <b>{dub:,} تومان</b> به‌ازای هر دقیقه\n\n"
+        "هزینهٔ نهایی پیش از ثبت سفارش نمایش داده می‌شود."
+    )
+
+
+def wallet_text(balance: int) -> str:
+    return f"👛 <b>کیف پول</b>\n\nموجودی فعلی: <b>{balance:,} تومان</b>"
 
 
 def mode_keyboard(token: str) -> InlineKeyboardMarkup:
