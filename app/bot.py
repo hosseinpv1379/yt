@@ -623,6 +623,8 @@ async def choose_mode(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 
 
 async def _separator_available(settings: Settings) -> bool:
+    if settings.dub_separator_backend == "fast":
+        return True
     if settings.dub_separator_backend == "lalal":
         return bool(settings.lalal_license_key)
     if not settings.dub_separator_url:
@@ -756,13 +758,17 @@ async def choose_quality(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     mode_label = "زیرنویس فارسی" if mode == "subtitle" else "دوبلهٔ فارسی"
     package = next((p for p in packages if p["mode"] == mode and p["minutes"] >= minutes), None)
     package_note = f"\nبستهٔ قابل استفاده: {package['minutes']} دقیقه" if package else ""
-    cloud_note = ("\n\nفقط ترک صوتی برای تفکیک گفتار و پس‌زمینه به LALAL.AI فرستاده می‌شود."
-                  if mode == "dub" and selection.dub_separator_backend == "lalal" else "")
+    background_note = ""
+    if mode == "dub":
+        background_note = {
+            "lalal": "\n\nفقط ترک صوتی برای تفکیک گفتار و پس‌زمینه به LALAL.AI فرستاده می‌شود.",
+            "fast": "\n\nحالت سریع: صدای اصلی در بخش‌های گفتار قطع می‌شود و بین آن‌ها شنیده می‌شود.",
+        }.get(selection.dub_separator_backend, "")
     await query.answer()
     await _edit_query_screen(query, ui.screen("بررسی و پرداخت · مرحلهٔ ۳ از ۳",
         f"خروجی: {mode_label} · کیفیت: {quality}\n"
         f"مدت قابل محاسبه: {minutes} دقیقه\nتعرفه: {rate:,} تومان در دقیقه\n"
-        f"هزینه: {amount:,} تومان · موجودی: {balance:,} تومان{package_note}{cloud_note}\n\n"
+        f"هزینه: {amount:,} تومان · موجودی: {balance:,} تومان{package_note}{background_note}\n\n"
         "روش پرداخت را انتخاب کن؛ پس از تأیید، سفارش وارد صف می‌شود.", icon="🧾"),
         parse_mode="HTML",
         reply_markup=ui.confirmation_keyboard(token, package["id"] if package else None),
@@ -1682,7 +1688,11 @@ async def admin_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         if secret:
             help_text = "کلید را ارسال کن؛ برای حذف کلید ذخیره‌شده «پاک» بفرست."
         elif name == "dub_separator_backend":
-            help_text = "برای API ابری LALAL.AI، مقدار lalal را بفرست. برای پردازش روی سرور خودت، local را بفرست."
+            help_text = (
+                "fast — حالت سریع با زمان‌بندی گفتار، بدون کلید جداگانه\n"
+                "local — جداسازی با مدل روی سرور\n"
+                "lalal — جداسازی با API سرویس LALAL.AI"
+            )
         elif name == "download_domain":
             help_text = (
                 "دامنهٔ عمومی مثل files.example.com را بفرست. ربات Caddy را می‌سازد و HTTPS را تنظیم می‌کند؛ "

@@ -1237,6 +1237,46 @@ def _audio_chunk_offsets(audio_dir: Path, chunks: list[Path]) -> dict[str, float
     return offsets
 
 
+def _make_fast_background(video: Path, output: Path, segments: list[dict]) -> None:
+    """Keep the original ambience outside timestamped dialogue, with short fades."""
+    fade = 0.08
+    intervals: list[tuple[float, float]] = []
+    for segment in sorted(segments, key=lambda item: item["start"]):
+        start, end = segment["start"], segment["end"]
+        if not (math.isfinite(start) and math.isfinite(end) and 0 <= start < end):
+            continue
+        start, end = max(0.0, start - 0.15), end + 0.20
+        if intervals and start <= intervals[-1][1] + 2 * fade:
+            intervals[-1] = (intervals[-1][0], max(end, intervals[-1][1]))
+        else:
+            intervals.append((start, end))
+    if not intervals:
+        raise RuntimeError("زمان‌بندی گفتار برای آماده‌سازی پس‌زمینه معتبر نیست.")
+
+    def gain_expression(first: int, last: int) -> str:
+        if first + 1 == last:
+            start, end = intervals[first]
+            return f"clip(max({start:.6f}-t,t-{end:.6f})/{fade},0,1)"
+        middle = (first + last) // 2
+        boundary = intervals[middle][0] - fade
+        # A balanced expression only evaluates one branch per audio frame.
+        return (f"if(lt(t,{boundary:.6f}),"
+                f"{gain_expression(first, middle)},{gain_expression(middle, last)})")
+
+    script = output.with_suffix(".filter")
+    gain = gain_expression(0, len(intervals))
+    script.write_text(
+        f"[0:a:0]asetpts=PTS-STARTPTS,volume='{gain}':eval=frame[background]",
+        encoding="ascii",
+    )
+    try:
+        _run(["ffmpeg", "-v", "error", "-y", "-i", str(video),
+              "-filter_complex_script", str(script), "-map", "[background]",
+              "-ac", "2", "-c:a", "pcm_f32le", "-rf64", "auto", str(output)])
+    finally:
+        script.unlink(missing_ok=True)
+
+
 def _separate_cloud_background(
     video: Path, background: Path, settings: Settings, cancel_event: asyncio.Event,
 ) -> None:
@@ -1278,7 +1318,10 @@ def process_video(
         progress_callback("دانلود ویدیو", 0)
     video, context = _download(url, job_dir, settings, selected_height, progress_callback)
     background = None
-    if mode == "dub":
+    fast_background = (
+        mode == "dub" and local_separator is None and settings.dub_separator_backend == "fast"
+    )
+    if mode == "dub" and not fast_background:
         cloud = local_separator is None and settings.dub_separator_backend == "lalal"
         if local_separator is None and not cloud and not settings.dub_separator_url:
             raise RuntimeError("سرویس جداسازی گفتار برای دوبله فعال نیست.")
@@ -1368,6 +1411,13 @@ def process_video(
             progress_callback(f"تبدیل گفتار به متن ({index + 1}/{len(chunks)})", percent)
     if not segments:
         raise RuntimeError("گفتاری برای رونویسی پیدا نشد.")
+
+    if fast_background:
+        _check_cancel(cancel_event)
+        if progress_callback:
+            progress_callback("آماده‌سازی پس‌زمینه از زمان‌بندی گفتار", 59)
+        background = job_dir / "dub-background.wav"
+        _make_fast_background(video, background, segments)
 
     _check_cancel(cancel_event)
     if progress_callback:

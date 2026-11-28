@@ -242,8 +242,8 @@ def parse_admin_setting(settings: Settings, name: str, value: str):
             raise ValueError("API Hash تلگرام باید ۳۲ نویسهٔ شانزده‌شانزدهی باشد.")
         return raw.lower()
     if name == "dub_separator_backend":
-        if raw.lower() not in {"local", "lalal"}:
-            raise ValueError("برای پردازش ابری lalal و برای پردازش محلی local بفرست.")
+        if raw.lower() not in {"fast", "local", "lalal"}:
+            raise ValueError("برای حالت سریع fast، مدل محلی local یا تفکیک ابری lalal بفرست.")
         return raw.lower()
     if name == "lalal_license_key":
         if raw and any(not 33 <= ord(char) <= 126 for char in raw):
