@@ -13,6 +13,7 @@ from telegram.ext import ApplicationHandlerStop, CallbackQueryHandler, MessageHa
 
 from app import ui
 from app.pipeline import publish_download
+from app.telegram_upload import BOT_API_MAX_BYTES, send_large_file
 from .ass_builder import FONT_FILES, FONT_LABELS, FONT_SIZE_LABELS
 from .grading import GradeSettings
 from .pipeline import probe, render
@@ -352,11 +353,14 @@ async def run_job(application, state, job):
             await updater
             progress_stopped = True
             job.delivery_started = True
-            if output.stat().st_size <= 48_000_000:
+            if output.stat().st_size <= BOT_API_MAX_BYTES:
                 with output.open("rb") as media:
                     await application.bot.send_video(job.chat_id, media, width=meta["width"], height=meta["height"],
                                                      duration=ceil(meta["duration"]), supports_streaming=True,
                                                      read_timeout=120, write_timeout=120)
+            elif await send_large_file(application, state.settings, job.chat_id, output,
+                                       "📝 ویدیوی زیرنویس‌شده آماده است."):
+                delivered = True
             elif state.settings.download_base_url:
                 token = await asyncio.to_thread(publish_download, output, Path(state.settings.download_dir), state.settings.download_ttl_hours)
                 await state.database.add_download(job.id, token, "video-fa.mp4", output.stat().st_size,

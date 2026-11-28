@@ -1,4 +1,5 @@
 python-telegram-bot>=22.8,<23
+Telethon>=1.45,<2
 openai>=1.50,<3
 yt-dlp[default]>=2025.1.0
 bgutil-ytdlp-pot-provider==2.0.2

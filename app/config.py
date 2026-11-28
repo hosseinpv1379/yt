@@ -1,6 +1,7 @@
 """Startup credentials and defaults for settings managed by the Telegram admin panel."""
 from dataclasses import dataclass
 import os
+import re
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -51,6 +52,10 @@ class Settings:
     card_to_card_holder: str = ""
     minimum_wallet_topup_toman: int = 50000
     dub_separator_url: str = ""
+    dub_separator_backend: str = "local"
+    lalal_license_key: str = ""
+    telegram_upload_api_id: str = ""
+    telegram_upload_api_hash: str = ""
     caption_model_path: str = "/data/models/whisper-medium"
     caption_fonts_dir: str = "/app/assets/fonts"
     caption_background_brightness: float = 0.55
@@ -74,6 +79,8 @@ ADMIN_SETTING_FIELDS = (
     "tts_voice", "watermark_text", "default_subtitle_price_toman_per_minute",
     "default_dub_price_toman_per_minute", "support_username", "card_to_card_number",
     "card_to_card_holder", "minimum_wallet_topup_toman", "dub_separator_url",
+    "dub_separator_backend", "lalal_license_key",
+    "telegram_upload_api_id", "telegram_upload_api_hash",
     "caption_model_path", "caption_background_brightness",
     "caption_background_saturation", "caption_subject_saturation",
     "caption_contrast", "caption_mask_smoothing",
@@ -217,7 +224,8 @@ def parse_admin_setting(settings: Settings, name: str, value: str):
         "openai_api_key", "openai_admin_key", "openai_project_id", "openrouter_api_key",
         "youtube_cookies_file", "instagram_cookies_file", "watermark_text",
         "download_base_url", "download_domain", "card_to_card_number", "card_to_card_holder",
-        "support_username", "dub_separator_url",
+        "support_username", "dub_separator_url", "lalal_license_key",
+        "telegram_upload_api_id", "telegram_upload_api_hash",
     }
     if not raw and name not in optional:
         raise ValueError("این مقدار نمی‌تواند خالی باشد.")
@@ -225,6 +233,22 @@ def parse_admin_setting(settings: Settings, name: str, value: str):
         return ""
     if name == "download_domain":
         return normalize_public_domain(raw)
+    if name == "telegram_upload_api_id":
+        if raw and (not re.fullmatch(r"[0-9]{1,10}", raw) or not 0 < int(raw) <= 2_147_483_647):
+            raise ValueError("API ID تلگرام باید یک عدد صحیح مثبت باشد.")
+        return str(int(raw)) if raw else ""
+    if name == "telegram_upload_api_hash":
+        if raw and not re.fullmatch(r"[0-9a-fA-F]{32}", raw):
+            raise ValueError("API Hash تلگرام باید ۳۲ نویسهٔ شانزده‌شانزدهی باشد.")
+        return raw.lower()
+    if name == "dub_separator_backend":
+        if raw.lower() not in {"local", "lalal"}:
+            raise ValueError("برای پردازش ابری lalal و برای پردازش محلی local بفرست.")
+        return raw.lower()
+    if name == "lalal_license_key":
+        if raw and any(not 33 <= ord(char) <= 126 for char in raw):
+            raise ValueError("کلید LALAL.AI را بدون فاصله یا خط اضافه بفرست.")
+        return raw
     if name in {"openai_api_key", "openai_admin_key", "openai_project_id", "openrouter_api_key"}:
         return raw
     if name == "support_username":

@@ -10,6 +10,7 @@ import random
 import re
 import shutil
 import subprocess
+import tempfile
 import threading
 import time
 import uuid
@@ -27,6 +28,7 @@ from websockets.sync.client import connect
 import yt_dlp
 
 from .config import Settings
+from .lalal_separator import download_background
 from .model_catalog import ModelSelection, defaults
 from .subtitles import caption_cues, source_cues
 
@@ -1235,6 +1237,27 @@ def _audio_chunk_offsets(audio_dir: Path, chunks: list[Path]) -> dict[str, float
     return offsets
 
 
+def _separate_cloud_background(
+    video: Path, background: Path, settings: Settings, cancel_event: asyncio.Event,
+) -> None:
+    if not settings.lalal_license_key:
+        raise RuntimeError("کلید LALAL.AI برای تفکیک صدای دوبله تنظیم نشده است.")
+    with tempfile.TemporaryDirectory(prefix="dub-cloud-", dir=background.parent) as directory:
+        source = Path(directory) / "source.flac"
+        separated = Path(directory) / "background.flac"
+        wav = Path(directory) / "background.wav"
+        _run(["ffmpeg", "-v", "error", "-y", "-i", str(video), "-map", "0:a:0",
+              "-ac", "2", "-ar", "44100", "-c:a", "flac", str(source)])
+        download_background(source, separated, settings.lalal_license_key,
+                            lambda: _check_cancel(cancel_event))
+        _check_cancel(cancel_event)
+        _run(["ffmpeg", "-v", "error", "-y", "-i", str(separated), "-map", "0:a:0",
+              "-c:a", "pcm_f32le", "-rf64", "auto", str(wav)])
+        if abs(_media_duration(wav) - _media_duration(source)) > 1.0:
+            raise RuntimeError("مدت صدای تفکیک‌شده با صدای اصلی یکی نیست.")
+        wav.replace(background)
+
+
 def process_video(
     url: str,
     job_dir: Path,
@@ -1256,19 +1279,22 @@ def process_video(
     video, context = _download(url, job_dir, settings, selected_height, progress_callback)
     background = None
     if mode == "dub":
-        if local_separator is None and not settings.dub_separator_url:
+        cloud = local_separator is None and settings.dub_separator_backend == "lalal"
+        if local_separator is None and not cloud and not settings.dub_separator_url:
             raise RuntimeError("سرویس جداسازی گفتار برای دوبله فعال نیست.")
         if progress_callback:
-            progress_callback("جداسازی گفتار از موسیقی و افکت‌ها", 20)
+            progress_callback("تفکیک ابری صدای پس‌زمینه" if cloud else "جداسازی گفتار از موسیقی و افکت‌ها", 20)
+        background = job_dir / "dub-background.wav"
         if local_separator is not None:
             local_separator(job_dir, video)
+        elif cloud:
+            _separate_cloud_background(video, background, settings, cancel_event)
         else:
             try:
                 response = httpx.post(settings.dub_separator_url + "/separate", json={"job_id": job_dir.name, "source": video.name}, timeout=httpx.Timeout(14400, connect=5))
                 response.raise_for_status()
             except httpx.HTTPError as exc:
                 raise RuntimeError("تفکیک صدای پس‌زمینه ناموفق بود.") from exc
-        background = job_dir / "dub-background.wav"
         if not background.is_file() or not 0 < _media_duration(background) <= _media_duration(video) + 1.0:
             raise RuntimeError("فایل صدای تفکیک‌شده نامعتبر است.")
         _check_cancel(cancel_event)

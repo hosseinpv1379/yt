@@ -22,6 +22,7 @@ from .backup import create_database_backup
 from .config import ADMIN_SETTING_FIELDS, Settings, load_settings, parse_admin_setting
 from .database import Database
 from .openai_limits import ModelLimit, OpenAILimitsUnavailable, get_openai_limits
+from .telegram_upload import BOT_API_MAX_BYTES, send_large_file
 from . import ui, model_catalog, image_generation
 from .downloads import (
     classify_link, download_media, is_instagram_media_url, is_instagram_profile_url,
@@ -75,6 +76,7 @@ class Job:
     progress_last_edit: float = 0.0
     progress_last_text: str = ""
     delivery_started: bool = False
+    dub_separator_backend: str | None = None
 
 
 @dataclass
@@ -136,6 +138,7 @@ class PendingQuality:
     probing: bool = False
     available_heights: list[int] = field(default_factory=list)
     stage: str = "mode"
+    dub_separator_backend: str = "local"
 
 
 @dataclass
@@ -285,6 +288,11 @@ async def _load_admin_settings(database: Database, settings: Settings) -> Settin
     return configured
 
 
+SECRET_ADMIN_SETTINGS = {
+    "openai_api_key", "openai_admin_key", "openrouter_api_key", "lalal_license_key",
+    "telegram_upload_api_hash",
+}
+
 ADMIN_SETTING_CATEGORIES = {
     "keys": ("🔐 کلیدهای API", (
         "openai_api_key", "openrouter_api_key", "openai_admin_key", "openai_project_id",
@@ -292,7 +300,13 @@ ADMIN_SETTING_CATEGORIES = {
     "service": ("🌐 پردازش و سرویس", (
         "openrouter_rpm_limit", "openrouter_max_retries", "video_max_minutes",
         "video_max_height", "max_file_bytes", "ffmpeg_threads", "ffmpeg_preset",
-        "youtube_cookies_file", "instagram_cookies_file", "ytdlp_pot_base_url", "dub_separator_url",
+        "youtube_cookies_file", "instagram_cookies_file", "ytdlp_pot_base_url",
+    )),
+    "dubsep": ("🎙 تفکیک صدای دوبله", (
+        "dub_separator_backend", "lalal_license_key", "dub_separator_url",
+    )),
+    "upload": ("📤 ارسال فایل حجیم در تلگرام", (
+        "telegram_upload_api_id", "telegram_upload_api_hash",
     )),
     "delivery": ("📦 خروجی و دانلود", (
         "download_ttl_hours", "watermark_text", "caption_model_path",
@@ -327,7 +341,11 @@ ADMIN_SETTING_LABELS = {
     "youtube_cookies_file": "مسیر فایل کوکی یوتیوب",
     "instagram_cookies_file": "مسیر فایل کوکی Instagram",
     "ytdlp_pot_base_url": "نشانی سرویس PO Token یوتیوب",
-    "dub_separator_url": "نشانی سرویس جداسازی گفتار برای دوبله",
+    "dub_separator_url": "نشانی تفکیک محلی گفتار",
+    "dub_separator_backend": "روش تفکیک صدا",
+    "lalal_license_key": "کلید API سرویس LALAL.AI",
+    "telegram_upload_api_id": "API ID تلگرام",
+    "telegram_upload_api_hash": "API Hash تلگرام",
     "download_base_url": "نشانی عمومی لینک دانلود",
     "download_domain": "دامنهٔ HTTPS دانلود",
     "download_ttl_hours": "مدت نگهداری لینک دانلود به ساعت",
@@ -605,6 +623,8 @@ async def choose_mode(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 
 
 async def _separator_available(settings: Settings) -> bool:
+    if settings.dub_separator_backend == "lalal":
+        return bool(settings.lalal_license_key)
     if not settings.dub_separator_url:
         return False
     try:
@@ -731,15 +751,18 @@ async def choose_quality(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     selection.selected_height = selected_height
     selection.quoted_rate = rate
     selection.stage = "payment"
+    selection.dub_separator_backend = state.settings.dub_separator_backend
     quality = "خودکار" if selected_height is None else f"{selected_height}p"
     mode_label = "زیرنویس فارسی" if mode == "subtitle" else "دوبلهٔ فارسی"
     package = next((p for p in packages if p["mode"] == mode and p["minutes"] >= minutes), None)
     package_note = f"\nبستهٔ قابل استفاده: {package['minutes']} دقیقه" if package else ""
+    cloud_note = ("\n\nفقط ترک صوتی برای تفکیک گفتار و پس‌زمینه به LALAL.AI فرستاده می‌شود."
+                  if mode == "dub" and selection.dub_separator_backend == "lalal" else "")
     await query.answer()
     await _edit_query_screen(query, ui.screen("بررسی و پرداخت · مرحلهٔ ۳ از ۳",
         f"خروجی: {mode_label} · کیفیت: {quality}\n"
         f"مدت قابل محاسبه: {minutes} دقیقه\nتعرفه: {rate:,} تومان در دقیقه\n"
-        f"هزینه: {amount:,} تومان · موجودی: {balance:,} تومان{package_note}\n\n"
+        f"هزینه: {amount:,} تومان · موجودی: {balance:,} تومان{package_note}{cloud_note}\n\n"
         "روش پرداخت را انتخاب کن؛ پس از تأیید، سفارش وارد صف می‌شود.", icon="🧾"),
         parse_mode="HTML",
         reply_markup=ui.confirmation_keyboard(token, package["id"] if package else None),
@@ -767,6 +790,11 @@ async def confirm_order(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     selection.confirming = True
     selection.stage = "confirming"
     mode = selection.mode
+    if mode == "dub" and selection.dub_separator_backend != state.settings.dub_separator_backend:
+        selection.confirming = False
+        selection.stage = "payment"
+        await query.answer("روش تفکیک تغییر کرده است. کیفیت را دوباره انتخاب کن تا پیش‌فاکتور تازه شود.", show_alert=True)
+        return
     if mode == "dub" and not await _separator_available(state.settings):
         selection.confirming = False
         selection.stage = "payment"
@@ -836,6 +864,7 @@ async def confirm_order(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         can_use_draft=True, billable_minutes=minutes,
         billed_amount_toman=0 if package_id else amount, models=models, team_glossary=team_glossary,
         package_minutes=minutes if package_id else 0,
+        dub_separator_backend=selection.dub_separator_backend if mode == "dub" else None,
     )
     state.active[user.id] = job
     await state.queue.put(job)
@@ -1460,7 +1489,7 @@ async def _show_admin_setting_category(query, state: BotState, category: str) ->
     for name in names:
         label = ADMIN_SETTING_LABELS[name]
         value = getattr(state.settings, name)
-        if name in {"openai_api_key", "openai_admin_key", "openrouter_api_key"}:
+        if name in SECRET_ADMIN_SETTINGS:
             current = "تنظیم شده" if value else "تنظیم نشده"
         elif isinstance(value, str) and len(value) > 28:
             current = value[:25] + "…"
@@ -1649,9 +1678,11 @@ async def admin_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         name = action[2]
         flow = _begin_admin_input(state, user.id, f"config_{name}")
         await query.answer()
-        secret = name in {"openai_api_key", "openai_admin_key", "openrouter_api_key"}
+        secret = name in SECRET_ADMIN_SETTINGS
         if secret:
             help_text = "کلید را ارسال کن؛ برای حذف کلید ذخیره‌شده «پاک» بفرست."
+        elif name == "dub_separator_backend":
+            help_text = "برای API ابری LALAL.AI، مقدار lalal را بفرست. برای پردازش روی سرور خودت، local را بفرست."
         elif name == "download_domain":
             help_text = (
                 "دامنهٔ عمومی مثل files.example.com را بفرست. ربات Caddy را می‌سازد و HTTPS را تنظیم می‌کند؛ "
@@ -1946,7 +1977,7 @@ async def _save_admin_value(update: Update, state: BotState, application: Applic
             os.environ["FFMPEG_PRESET"] = str(value)
         _clear_user_input(state, user.id)
         confirmation = f"✅ تنظیم «{ADMIN_SETTING_LABELS.get(name, name)}» ذخیره شد."
-        if name in {"openai_api_key", "openai_admin_key", "openrouter_api_key"}:
+        if name in SECRET_ADMIN_SETTINGS:
             try:
                 await _return_to_admin_panel(message.reply_text, state, user.id, confirmation)
             finally:
@@ -3538,6 +3569,9 @@ async def worker(application: Application) -> None:
             progress_task = asyncio.create_task(_progress_updater(application, job, progress_queue))
             await _publish_progress(application, job, "دانلود ویدیو", 0)
             background_percent = 100
+            job_settings = state.settings
+            if job.dub_separator_backend is not None:
+                job_settings = replace(job_settings, dub_separator_backend=job.dub_separator_backend)
             if job.mode == "dub":
                 background_percent = _bounded_percent(
                     await state.database.get_setting("dub_background_audio_percent", "100")
@@ -3546,7 +3580,7 @@ async def worker(application: Application) -> None:
                 process_video,
                 job.url,
                 job.directory,
-                state.settings,
+                job_settings,
                 job.cancel_event,
                 job.selected_height,
                 report_progress,
@@ -3566,11 +3600,21 @@ async def worker(application: Application) -> None:
             await _publish_progress(application, job, "ارسال ویدیو", 95)
             receipt = _receipt_text(job)
             completion_note = "پردازش کامل شد؛ ویدیوی آماده ارسال شد."
-            if (
+            use_player = (
                 job.mode == "subtitle"
                 and not state.settings.watermark_text
                 and state.settings.download_base_url
-            ):
+            )
+            file_size = output.stat().st_size
+            sent_large = False
+            if file_size > BOT_API_MAX_BYTES:
+                caption = (
+                    "🎙 دوبلهٔ فارسی آماده است." if job.mode == "dub" else
+                    "📝 ویدیو آماده است. فایل زیرنویس جداگانه ارسال می‌شود." if use_player else
+                    "📝 ویدیو با زیرنویس فارسی آماده است."
+                )
+                sent_large = await send_large_file(application, state.settings, job.chat_id, output, caption)
+            if use_player and not sent_large:
                 await stop_progress_updates()
                 player_url = await _publish_subtitle_player_link(
                     application, job, output, srt, vtt, state.settings, state.database
@@ -3589,7 +3633,7 @@ async def worker(application: Application) -> None:
                     complete=True,
                 )
                 continue
-            if output.stat().st_size > 48_000_000:
+            if file_size > BOT_API_MAX_BYTES and not sent_large:
                 if state.settings.download_base_url:
                     await stop_progress_updates()
                     await _send_download_link(
@@ -3621,22 +3665,23 @@ async def worker(application: Application) -> None:
                     )
                 continue
             try:
-                with output.open("rb") as video_file:
-                    await application.bot.send_chat_action(job.chat_id, ChatAction.UPLOAD_VIDEO)
-                    await application.bot.send_video(
-                        chat_id=job.chat_id,
-                        video=video_file,
-                        supports_streaming=True,
-                        caption=(
-                            ui.screen("دوبلهٔ فارسی آماده است", "صدای دوبله با صدای پس‌زمینه ترکیب شده است.", icon="🎙")
-                            if job.mode == "dub"
-                            else ui.screen("زیرنویس فارسی آماده است", "زیرنویس روی ویدیو قرار گرفت.", icon="📝")
-                        ),
-                        parse_mode="HTML",
-                        read_timeout=120,
-                        write_timeout=120,
-                        connect_timeout=30,
-                    )
+                if not sent_large:
+                    with output.open("rb") as video_file:
+                        await application.bot.send_chat_action(job.chat_id, ChatAction.UPLOAD_VIDEO)
+                        await application.bot.send_video(
+                            chat_id=job.chat_id,
+                            video=video_file,
+                            supports_streaming=True,
+                            caption=(
+                                ui.screen("دوبلهٔ فارسی آماده است", "صدای دوبله با صدای پس‌زمینه ترکیب شده است.", icon="🎙")
+                                if job.mode == "dub"
+                                else ui.screen("زیرنویس فارسی آماده است", "زیرنویس روی ویدیو قرار گرفت.", icon="📝")
+                            ),
+                            parse_mode="HTML",
+                            read_timeout=120,
+                            write_timeout=120,
+                            connect_timeout=30,
+                        )
             except NetworkError as exc:
                 if "request entity too large" not in str(exc).lower():
                     raise
@@ -4067,6 +4112,9 @@ async def post_shutdown(application: Application) -> None:
     if worker_task:
         await state.queue.put(None)
         await worker_task
+    uploader = application.bot_data.get("large_file_uploader")
+    if uploader is not None:
+        await uploader.close()
     backup_task = application.bot_data.get("backup_task")
     if backup_task:
         backup_task.cancel()
