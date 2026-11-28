@@ -39,6 +39,7 @@ class VideoCaptionJob:
     mode: str = "subtitle"
     delivery_started: bool = False
     cancel_event: asyncio.Event = field(default_factory=asyncio.Event)
+    video_title: str = ""
 
 
 def _pending(application):
@@ -204,7 +205,8 @@ async def callback(update, context):
                               item["file_id"], item["mode"], item["color"], item["minutes"],
                               item["minutes"] if package_id else 0,
                               language=None if item["language"] == "auto" else item["language"],
-                              font=item.get("font", "vazirmatn"), font_size=item.get("font_size", "medium"))
+                              font=item.get("font", "vazirmatn"), font_size=item.get("font_size", "medium"),
+                              video_title=item.get("video_title", ""))
         pending.pop(user.id, None)
         state.clear_stage(user.id, item["token"])
         state.active[user.id] = job
@@ -282,7 +284,8 @@ async def receive_video(update, context):
         await ui.reply(message, ui.screen("محدودیت ویدیو", "حداکثر مدت ۹۰ ثانیه و حداکثر حجم ۲۰ مگابایت است.", icon="⚠️"), parse_mode="HTML")
         raise ApplicationHandlerStop
     token = uuid.uuid4().hex[:12]
-    item.update(stage="options", token=token, file_id=video.file_id, duration=duration)
+    item.update(stage="options", token=token, file_id=video.file_id, duration=duration,
+                video_title=Path(getattr(video, "file_name", None) or "").stem)
     context.application.bot_data["state"].track_stage(
         user.id, "video_options", token, "menu:services"
     )
@@ -318,7 +321,8 @@ async def run_job(application, state, job):
             raise InterruptedError("لغو شد")
         with tempfile.TemporaryDirectory(prefix="caption-", dir=state.settings.work_dir) as temp:
             directory = Path(temp).resolve()
-            source, output = directory / "input.mp4", directory / "output.mp4"
+            source = directory / "input"
+            output = directory / ui.video_filename(job.video_title or "ویدیوی ارسالی")
             progress("📥 در حال دریافت ویدیو…")
             file = await application.bot.get_file(job.file_id)
             if file.file_size and file.file_size > MAX_INPUT:

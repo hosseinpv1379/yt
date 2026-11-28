@@ -16,6 +16,7 @@ import time
 import uuid
 import wave
 from dataclasses import dataclass
+from html import escape
 from pathlib import Path
 from typing import Callable
 from urllib.parse import urlencode, urlparse
@@ -436,6 +437,7 @@ def _download(
 
 def _transcribe(
     audio_path: Path, client: OpenAI, model: str, *, word_timestamps: bool = False,
+    dialogue_intervals: list[dict] | None = None,
 ) -> tuple[list[dict], float | None]:
     with audio_path.open("rb") as audio:
         try:
@@ -462,9 +464,15 @@ def _transcribe(
     if word_timestamps:
         raw_words = getattr(response, "words", None) or []
         reference = (getattr(response, "text", "") or "").strip() or " ".join(s["text"] for s in segments)
-        segments, timed_by_word = source_cues(segments, raw_words, reference)
-        if not timed_by_word and segments:
-            logger.info("Word timestamps unavailable or incomplete; subtitle timing is estimated within source segments")
+        if dialogue_intervals is not None:
+            # Keep narrow dialogue ranges for the ambience gate. The dub still
+            # translates complete source segments for context and natural phrasing.
+            dialogue, _ = source_cues(segments, raw_words, reference, pause_seconds=0.22)
+            dialogue_intervals.extend(dialogue)
+        else:
+            segments, timed_by_word = source_cues(segments, raw_words, reference)
+            if not timed_by_word and segments:
+                logger.info("Word timestamps unavailable or incomplete; subtitle timing is estimated within source segments")
     if not segments and getattr(response, "text", "").strip():
         raise RuntimeError("مدل رونویسی زمان‌بندی بخش‌ها را برنگرداند؛ مدل دارای timestamp لازم است.")
     usage = getattr(response, "usage", None)
@@ -1239,13 +1247,13 @@ def _audio_chunk_offsets(audio_dir: Path, chunks: list[Path]) -> dict[str, float
 
 def _make_fast_background(video: Path, output: Path, segments: list[dict]) -> None:
     """Keep the original ambience outside timestamped dialogue, with short fades."""
-    fade = 0.08
+    fade = 0.035
     intervals: list[tuple[float, float]] = []
     for segment in sorted(segments, key=lambda item: item["start"]):
         start, end = segment["start"], segment["end"]
         if not (math.isfinite(start) and math.isfinite(end) and 0 <= start < end):
             continue
-        start, end = max(0.0, start - 0.15), end + 0.20
+        start, end = max(0.0, start - 0.045), end + 0.065
         if intervals and start <= intervals[-1][1] + 2 * fade:
             intervals[-1] = (intervals[-1][0], max(end, intervals[-1][1]))
         else:
@@ -1383,14 +1391,18 @@ def process_video(
     tts_model = selection.tts.model
     tts_voice = selection.voice
     segments: list[dict] = []
+    speech_intervals: list[dict] = []
     transcribed_cost = 0.0
     transcription_cost_known = True
     if progress_callback:
         progress_callback("تبدیل گفتار به متن", 38)
     for index, chunk in enumerate(chunks):
         _check_cancel(cancel_event)
+        chunk_dialogue: list[dict] = []
+        timing_options = {"dialogue_intervals": chunk_dialogue} if fast_background else {}
         transcribed_segments, request_cost = _transcribe(
-            chunk, transcription_client, transcription_model, word_timestamps=(mode == "subtitle")
+            chunk, transcription_client, transcription_model,
+            word_timestamps=mode == "subtitle" or fast_background, **timing_options,
         )
         if request_cost is not None:
             transcribed_cost += request_cost
@@ -1406,6 +1418,12 @@ def process_video(
             segment["start"] += chunk_offsets[chunk.name]
             segment["end"] += chunk_offsets[chunk.name]
             segments.append(segment)
+        if fast_background:
+            offset = chunk_offsets[chunk.name]
+            speech_intervals.extend(
+                {"start": item["start"] + offset, "end": item["end"] + offset}
+                for item in chunk_dialogue
+            )
         if progress_callback:
             percent = 40 + round(18 * (index + 1) / len(chunks))
             progress_callback(f"تبدیل گفتار به متن ({index + 1}/{len(chunks)})", percent)
@@ -1417,7 +1435,7 @@ def process_video(
         if progress_callback:
             progress_callback("آماده‌سازی پس‌زمینه از زمان‌بندی گفتار", 59)
         background = job_dir / "dub-background.wav"
-        _make_fast_background(video, background, segments)
+        _make_fast_background(video, background, speech_intervals or segments)
 
     _check_cancel(cancel_event)
     if progress_callback:
@@ -1556,7 +1574,7 @@ def publish_subtitle_player(
       پخش ویدیو در این مرورگر پشتیبانی نمی‌شود.
     </video>
     <nav>
-      <a href="/{token}.mp4" download>دانلود ویدیو</a>
+      <a href="/{token}.mp4" download="{escape(video.name, quote=True)}">دانلود ویدیو</a>
       <a href="/{token}.srt" download>دانلود زیرنویس SRT</a>
     </nav>
     <p>برای روشن یا خاموش‌کردن زیرنویس، گزینهٔ CC در کنترل‌های ویدیو را بزن.</p>

@@ -70,7 +70,9 @@ def _spread_text(text: str, start: float, end: float, *, max_chars: int, max_wor
     return cues
 
 
-def source_cues(segments: list[dict], raw_words, reference_text: str) -> tuple[list[dict], bool]:
+def source_cues(
+    segments: list[dict], raw_words, reference_text: str, *, pause_seconds: float = PAUSE_SECONDS,
+) -> tuple[list[dict], bool]:
     """Return speech-sized source cues, using word times only if complete."""
     words = []
     words_valid = True
@@ -88,7 +90,7 @@ def source_cues(segments: list[dict], raw_words, reference_text: str) -> tuple[l
         for word in words:
             if current:
                 current_text = ' '.join(item['text'] for item in current)
-                if (word['start'] - current[-1]['end'] >= PAUSE_SECONDS
+                if (word['start'] - current[-1]['end'] >= pause_seconds
                     or word['end'] - current[0]['start'] > MAX_SOURCE_SECONDS
                     or len(current) >= MAX_SOURCE_WORDS
                     or len(current_text) + len(word['text']) + 1 > MAX_SOURCE_CHARS
@@ -124,7 +126,7 @@ def source_cues(segments: list[dict], raw_words, reference_text: str) -> tuple[l
         if candidates:
             candidate_words = [{'text': item['word']} for item in candidates]
             if _coverage(segment['text'], candidate_words):
-                timed, precise = source_cues([], candidates, segment['text'])
+                timed, precise = source_cues([], candidates, segment['text'], pause_seconds=pause_seconds)
                 if precise:
                     result.extend(timed)
                     continue

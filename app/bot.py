@@ -77,6 +77,7 @@ class Job:
     progress_last_text: str = ""
     delivery_started: bool = False
     dub_separator_backend: str | None = None
+    video_title: str = ""
 
 
 @dataclass
@@ -871,6 +872,7 @@ async def confirm_order(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         billed_amount_toman=0 if package_id else amount, models=models, team_glossary=team_glossary,
         package_minutes=minutes if package_id else 0,
         dub_separator_backend=selection.dub_separator_backend if mode == "dub" else None,
+        video_title=selection.video_title,
     )
     state.active[user.id] = job
     await state.queue.put(job)
@@ -3606,6 +3608,10 @@ async def worker(application: Application) -> None:
             await stop_progress_updates()
             if job.cancel_event.is_set():
                 raise JobCancelled()
+            delivery_dir = job.directory / "delivery"
+            delivery_dir.mkdir(exist_ok=True)
+            title = job.video_title or _stable_order_source(job.url)
+            output = output.rename(delivery_dir / ui.video_filename(title, output.suffix))
             job.delivery_started = True
             await _publish_progress(application, job, "ارسال ویدیو", 95)
             receipt = _receipt_text(job)

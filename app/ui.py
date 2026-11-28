@@ -5,6 +5,18 @@ import re
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
 
+def video_filename(title: str, suffix: str = ".mp4") -> str:
+    """Preserve the video title while producing a portable filename."""
+    title = re.sub(r'[<>:"/\\|?*\x00-\x1f\x7f]', " ", title)
+    title = " ".join(title.split()).strip(" .")
+    if title.lower().endswith(suffix.lower()):
+        title = title[:-len(suffix)].rstrip(" .")
+    title = title.encode("utf-8")[:180].decode("utf-8", errors="ignore").rstrip(" .")
+    if re.fullmatch(r"(?i)(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\..*)?", title):
+        title = f"ویدیو {title}"
+    return f"{title or 'ویدیو'}{suffix}"
+
+
 def html_escape(value: object) -> str:
     """Escape dynamic values before placing them in a Telegram HTML message."""
     return escape(str(value), quote=False)
