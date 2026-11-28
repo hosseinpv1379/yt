@@ -160,6 +160,7 @@ class OpenAICost:
     transcription_usd: float | None
     translation_usd: float | None
     tts_usd: float | None = 0.0
+    undubbed_groups: int = 0
 
     @property
     def total_usd(self) -> float | None:
@@ -169,6 +170,14 @@ class OpenAICost:
 
 class JobCancelled(Exception):
     pass
+
+
+class DubTimingError(RuntimeError):
+    def __init__(self, message: str, tts_usd: float | None = 0.0,
+                 rewrite_usd: float | None = 0.0) -> None:
+        super().__init__(message)
+        self.tts_usd = tts_usd
+        self.rewrite_usd = rewrite_usd
 
 
 def validate_youtube_url(url: str) -> bool:
@@ -757,7 +766,7 @@ def _create_dubbed_audio(
     cancel_event: asyncio.Event | None = None,
     translation_model: str = "",
     translation_client: OpenAI | None = None,
-) -> tuple[Path, float | None, float | None]:
+) -> tuple[Path, float | None, float | None, list[tuple[float, float]]]:
     query = urlencode({"model": model})
     url = f"wss://api.openai.com/v1/realtime?{query}"
     with connect(
@@ -787,7 +796,7 @@ def _create_openrouter_dubbed_audio(
     cancel_event: asyncio.Event | None = None,
     translation_model: str = "",
     translation_client: OpenAI | None = None,
-) -> tuple[Path, float | None, float | None]:
+) -> tuple[Path, float | None, float | None, list[tuple[float, float]]]:
     def synthesize(text, instructions):
         controls = {"instructions": instructions} if model.startswith("google/gemini-3.8") else {}
         response = client.audio.speech.create(
@@ -811,6 +820,8 @@ def _render_dub_track(segments, video, job_dir, synthesize, progress_callback,
 
     tts_cost: float | None = 0.0
     rewrite_cost: float | None = 0.0
+    original_dialogue: list[tuple[float, float]] = []
+    dubbed_groups = 0
     dubbed_audio = job_dir / "dubbed-fa.wav"
     silence = b"\0" * 48_000
     with wave.open(str(dubbed_audio), "wb") as stream:
@@ -825,6 +836,7 @@ def _render_dub_track(segments, video, job_dir, synthesize, progress_callback,
 
         for index, group in enumerate(groups):
             slot_ms = _dub_group_slot(groups, index, duration_ms)
+            extended_slot_ms = _dub_group_slot(groups, index, duration_ms, max_grace_ms=1800)
             target_ms = min(slot_ms, group["end_ms"] - group["start_ms"])
             delivery = DUB_DELIVERY.get(group["delivery"], DUB_DELIVERY["neutral"])
             directions = f"{DUB_VOICE_INSTRUCTIONS} {delivery} "
@@ -837,24 +849,37 @@ def _render_dub_track(segments, video, job_dir, synthesize, progress_callback,
                     raise RuntimeError("سرویس دوبله صدای PCM معتبر برنگرداند.")
                 return AudioSegment(data=pcm, sample_width=2, frame_rate=24_000, channels=1), cost
 
-            speech, request_cost, extra_cost = _synthesize_fitting_dub(
-                group["text"], slot_ms, audio_dir, index, generate,
-                translation_client, translation_model, cancel_event,
-            )
-            if not speech.rms:
-                raise RuntimeError("سرویس دوبله صدای قابل شنیدن برنگرداند.")
-            # Adjust each phrase gently. Keep the actor's inner dynamics and leave headroom.
-            gain = min(4.0, max(-8.0, -19.0 - speech.dBFS), -4.0 - speech.max_dBFS)
-            pad_to(group["start_ms"] * 24)
-            spoken = speech.apply_gain(gain).fade_in(5).fade_out(5)
-            stream.writeframesraw(spoken.raw_data[:slot_ms * 48])
+            try:
+                speech, request_cost, extra_cost = _synthesize_fitting_dub(
+                    group["text"], slot_ms, audio_dir, index, generate,
+                    translation_client, translation_model, cancel_event,
+                    extended_slot_ms=extended_slot_ms,
+                )
+            except DubTimingError as exc:
+                start = group["start_ms"]
+                end = min(group["end_ms"], start + extended_slot_ms)
+                if end > start:
+                    original_dialogue.append((start / 1000, end / 1000))
+                logger.warning("Dub group %d exceeded its slot; keeping original dialogue", index + 1)
+                request_cost, extra_cost = exc.tts_usd, exc.rewrite_usd
+            else:
+                if not speech.rms:
+                    raise RuntimeError("سرویس دوبله صدای قابل شنیدن برنگرداند.")
+                # Adjust each phrase gently and leave headroom for the mix.
+                gain = min(4.0, max(-8.0, -19.0 - speech.dBFS), -4.0 - speech.max_dBFS)
+                pad_to(group["start_ms"] * 24)
+                spoken = speech.apply_gain(gain).fade_in(5).fade_out(5)
+                stream.writeframesraw(spoken.raw_data)
+                dubbed_groups += 1
             tts_cost = _sum_known_costs(tts_cost, request_cost)
             rewrite_cost = _sum_known_costs(rewrite_cost, extra_cost)
             if progress_callback:
                 percent = 80 + round(10 * (index + 1) / len(groups))
                 progress_callback(f"ساخت صدای دوبله ({index + 1}/{len(groups)} بخش)", percent)
         pad_to(duration_ms * 24)
-    return dubbed_audio, tts_cost, rewrite_cost
+    if not dubbed_groups:
+        raise DubTimingError("هیچ بخشی از صدای دوبله پس از تلاش مجدد در زمان ویدیو جا نشد.")
+    return dubbed_audio, tts_cost, rewrite_cost, original_dialogue
 
 
 def _make_dub_groups(segments: list[dict], duration_ms: int) -> list[dict]:
@@ -909,12 +934,12 @@ def _make_dub_groups(segments: list[dict], duration_ms: int) -> list[dict]:
     return groups
 
 
-def _dub_group_slot(groups: list[dict], index: int, duration_ms: int) -> int:
+def _dub_group_slot(groups: list[dict], index: int, duration_ms: int, *, max_grace_ms: int = 750) -> int:
     group = groups[index]
     next_start = groups[index + 1]["start_ms"] if index + 1 < len(groups) else duration_ms
     end = group.get("end_ms", next_start)
     # A short extension can help Persian phrasing fit without swallowing the scene's pauses.
-    grace_ms = min(750, max(0, next_start - end - 150))
+    grace_ms = min(max_grace_ms, max(0, next_start - end - 150))
     return max(0, min(next_start, end + grace_ms) - group["start_ms"])
 
 
@@ -978,10 +1003,11 @@ def _shorten_dub_text(client: OpenAI, model: str, text: str, slot_ms: int,
 
 def _synthesize_fitting_dub(text: str, slot_ms: int, audio_dir: Path, index: int,
                            generate, client: OpenAI, translation_model: str,
-                           cancel_event: asyncio.Event | None = None
+                           cancel_event: asyncio.Event | None = None, *,
+                           extended_slot_ms: int | None = None,
                            ) -> tuple[AudioSegment, float | None, float | None]:
     if slot_ms <= 0:
-        raise RuntimeError("زمان کافی برای قرار دادن صدای دوبله وجود ندارد.")
+        raise DubTimingError("زمان کافی برای قرار دادن صدای دوبله وجود ندارد.")
     tts_cost: float | None = 0.0
     rewrite_cost: float | None = 0.0
     best_speech: AudioSegment | None = None
@@ -1003,7 +1029,12 @@ def _synthesize_fitting_dub(text: str, slot_ms: int, audio_dir: Path, index: int
         if best_speech is None or len(speech) < len(best_speech):
             best_speech = speech
         if len(speech) <= slot_ms * DUB_NORMAL_MAX_TEMPO:
-            return _fit_dub_speech(speech, slot_ms, audio_dir, index), tts_cost, rewrite_cost
+            try:
+                return _fit_dub_speech(speech, slot_ms, audio_dir, index), tts_cost, rewrite_cost
+            except DubTimingError:
+                pass
+        if extended_slot_ms and speech.frame_count() <= extended_slot_ms * speech.frame_rate / 1000:
+            return speech, tts_cost, rewrite_cost
         if attempt == 2 or not translation_model:
             break
         if cancel_event is not None:
@@ -1015,14 +1046,18 @@ def _synthesize_fitting_dub(text: str, slot_ms: int, audio_dir: Path, index: int
                     index + 1, attempt + 2, text != previous_text)
     # Prefer a faster complete utterance to rejecting the job, but cap the
     # pace; do not cut audio or overlap the following segment.
+    slot_ms = max(slot_ms, extended_slot_ms or 0)
     if best_speech is not None and len(best_speech) <= slot_ms * DUB_FALLBACK_MAX_TEMPO:
         if cancel_event is not None:
             _check_cancel(cancel_event)
-        logger.warning("Dub group %d needs faster playback to fit (%.2fx)", index + 1,
-                       len(best_speech) / slot_ms)
-        return (_fit_dub_speech(best_speech, slot_ms, audio_dir, index,
-                                max_tempo=DUB_FALLBACK_MAX_TEMPO), tts_cost, rewrite_cost)
-    raise RuntimeError("صدای دوبله پس از تلاش مجدد در زمان ویدیو جا نشد.")
+        logger.info("Fitting complete dub group %d into %d ms (%.2fx)",
+                    index + 1, slot_ms, max(1.0, len(best_speech) / slot_ms))
+        try:
+            return (_fit_dub_speech(best_speech, slot_ms, audio_dir, index,
+                                    max_tempo=DUB_FALLBACK_MAX_TEMPO), tts_cost, rewrite_cost)
+        except DubTimingError:
+            pass
+    raise DubTimingError("صدای دوبله پس از تلاش مجدد در زمان ویدیو جا نشد.", tts_cost, rewrite_cost)
 
 
 def _fit_dub_speech(
@@ -1031,12 +1066,12 @@ def _fit_dub_speech(
 ) -> AudioSegment:
     if slot_ms <= 0:
         raise RuntimeError("زمان کافی برای قرار دادن صدای دوبله وجود ندارد.")
-    if len(speech) <= slot_ms:
+    requested_tempo = speech.frame_count() * 1000 / (speech.frame_rate * slot_ms)
+    if requested_tempo <= 1:
         return speech
-    requested_tempo = len(speech) / slot_ms
     tempo = min(max_tempo, requested_tempo * 1.01)
     if requested_tempo > max_tempo:
-        raise RuntimeError("صدای دوبله در زمان ویدیو جا نمی‌شود؛ پردازش برای جلوگیری از تحویل صدای ناقص متوقف شد.")
+        raise DubTimingError("صدای دوبله در بازهٔ زمانی جا نمی‌شود.")
     source = audio_dir / f"group_{index:04d}.wav"
     fitted = audio_dir / f"group_{index:04d}_fit.wav"
     with source.open("wb") as stream:
@@ -1048,8 +1083,8 @@ def _fit_dub_speech(
     ])
     with fitted.open("rb") as stream:
         result = AudioSegment.from_wav(stream)
-    if len(result) > slot_ms:
-        raise RuntimeError("صدای دوبله پس از تنظیم سرعت در بازهٔ زمانی جا نشد.")
+    if result.frame_count() > slot_ms * result.frame_rate / 1000:
+        raise DubTimingError("صدای دوبله پس از تنظیم سرعت در بازهٔ زمانی جا نشد.")
     return result
 
 
@@ -1193,13 +1228,22 @@ def _mux_dubbed_video(
     *,
     background: Path,
     background_percent: int = 100,
+    original_dialogue: list[tuple[float, float]] | None = None,
 ) -> None:
     bed_volume = max(0, min(100, int(background_percent))) / 100
     stereo = "aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo"
-    # Map only the detached music/effects stem and the Persian track. Let the
-    # bed recover between phrases and lightly duck it under audible speech.
+    bed = f"[2:a:0]{stereo},volume={bed_volume:.2f},apad"
+    if original_dialogue:
+        # Replace the detached bed only inside the sections with no Persian
+        # voice. Complementary fades keep the original and the bed from stacking.
+        mask = _outside_dialogue_gain(original_dialogue, fade=0.035)
+        bed += (
+            f",asetpts=PTS-STARTPTS,volume='{mask}':eval=frame[clean];"
+            f"[0:a:0]{stereo},asetpts=PTS-STARTPTS,volume='1-({mask})':eval=frame[original];"
+            "[clean][original]amix=inputs=2:duration=first:normalize=0"
+        )
     audio_mix = (
-        f"[2:a:0]{stereo},volume={bed_volume:.2f},apad[bed];"
+        f"{bed}[bed];"
         f"[1:a:0]{stereo},highpass=f=65,asplit=2[voice_sc][voice];"
         "[bed][voice_sc]sidechaincompress=threshold=0.035:ratio=3:attack=20:release=320:mix=0.65[ducked];"
         "[voice][ducked]amix=inputs=2:duration=first:dropout_transition=0:normalize=0,"
@@ -1207,8 +1251,15 @@ def _mux_dubbed_video(
     )
     args = [
         "ffmpeg", "-hide_banner", "-loglevel", "error", "-y", "-i", str(video), "-i", str(audio),
-        "-i", str(background), "-filter_complex", audio_mix, "-map", "0:v:0", "-map", "[mixed]",
+        "-i", str(background),
     ]
+    script = output.parent / "dub-mix.filter"
+    if original_dialogue:
+        script.write_text(audio_mix, encoding="ascii")
+        args.extend(["-filter_complex_script", str(script)])
+    else:
+        args.extend(["-filter_complex", audio_mix])
+    args.extend(["-map", "0:v:0", "-map", "[mixed]"])
     watermark = _watermark_filter(watermark_text, output.parent)
     if watermark:
         args.extend([
@@ -1220,7 +1271,11 @@ def _mux_dubbed_video(
         "-c:a", "aac", "-b:a", "192k",
         "-shortest", "-movflags", "+faststart", str(output),
     ])
-    _run(args, cwd=output.parent)
+    try:
+        _run(args, cwd=output.parent)
+    finally:
+        if original_dialogue:
+            script.unlink(missing_ok=True)
 
 
 def _audio_chunk_offsets(audio_dir: Path, chunks: list[Path]) -> dict[str, float]:
@@ -1245,15 +1300,10 @@ def _audio_chunk_offsets(audio_dir: Path, chunks: list[Path]) -> dict[str, float
     return offsets
 
 
-def _make_fast_background(video: Path, output: Path, segments: list[dict]) -> None:
-    """Keep the original ambience outside timestamped dialogue, with short fades."""
-    fade = 0.035
+def _outside_dialogue_gain(ranges: list[tuple[float, float]], *, fade: float) -> str:
+    """Build an audio gain expression that fades to zero inside the supplied ranges."""
     intervals: list[tuple[float, float]] = []
-    for segment in sorted(segments, key=lambda item: item["start"]):
-        start, end = segment["start"], segment["end"]
-        if not (math.isfinite(start) and math.isfinite(end) and 0 <= start < end):
-            continue
-        start, end = max(0.0, start - 0.045), end + 0.065
+    for start, end in sorted(ranges):
         if intervals and start <= intervals[-1][1] + 2 * fade:
             intervals[-1] = (intervals[-1][0], max(end, intervals[-1][1]))
         else:
@@ -1271,8 +1321,18 @@ def _make_fast_background(video: Path, output: Path, segments: list[dict]) -> No
         return (f"if(lt(t,{boundary:.6f}),"
                 f"{gain_expression(first, middle)},{gain_expression(middle, last)})")
 
+    return gain_expression(0, len(intervals))
+
+
+def _make_fast_background(video: Path, output: Path, segments: list[dict]) -> None:
+    """Keep the original ambience outside timestamped dialogue, with short fades."""
+    ranges = [
+        (max(0.0, start - 0.045), end + 0.065)
+        for start, end in ((item["start"], item["end"]) for item in segments)
+        if math.isfinite(start) and math.isfinite(end) and 0 <= start < end
+    ]
     script = output.with_suffix(".filter")
-    gain = gain_expression(0, len(intervals))
+    gain = _outside_dialogue_gain(ranges, fade=0.035)
     script.write_text(
         f"[0:a:0]asetpts=PTS-STARTPTS,volume='{gain}':eval=frame[background]",
         encoding="ascii",
@@ -1445,6 +1505,7 @@ def process_video(
         for_dubbing=mode == "dub", cancel_event=cancel_event,
     )
     tts_cost: float | None = 0.0
+    original_dialogue = []
     # The dub keeps the original translated speech groups; subtitles use
     # separately segmented, non-overlapping display cues.
     display_segments = caption_cues(segments)
@@ -1461,11 +1522,11 @@ def process_video(
             progress_callback("ساخت صدای دوبلهٔ فارسی", 80)
         tts_client = client_for(selection.tts.provider)
         if selection.tts.provider == "openrouter":
-            dubbed_audio, tts_cost, rewrite_cost = _create_openrouter_dubbed_audio(
+            dubbed_audio, tts_cost, rewrite_cost, original_dialogue = _create_openrouter_dubbed_audio(
                 segments, video, job_dir, tts_client, tts_model, tts_voice, progress_callback, cancel_event, translation_model, translation_client
             )
         else:
-            dubbed_audio, tts_cost, rewrite_cost = _create_dubbed_audio(
+            dubbed_audio, tts_cost, rewrite_cost, original_dialogue = _create_dubbed_audio(
                 segments, video, job_dir, tts_client, tts_model, tts_voice, progress_callback, cancel_event, translation_model, translation_client
             )
         translation_cost = _sum_known_costs(translation_cost, rewrite_cost)
@@ -1475,6 +1536,7 @@ def process_video(
         _mux_dubbed_video(
             video, dubbed_audio, output, settings.watermark_text,
             background=background, background_percent=background_percent,
+            original_dialogue=original_dialogue,
         )
     else:
         if settings.watermark_text or not settings.download_base_url:
@@ -1490,7 +1552,7 @@ def process_video(
     if progress_callback:
         progress_callback("خروجی آمادهٔ ارسال", 94 if mode == "dub" else 90)
     transcription_cost = transcribed_cost if transcription_cost_known else None
-    costs = OpenAICost(transcription_cost, translation_cost, tts_cost)
+    costs = OpenAICost(transcription_cost, translation_cost, tts_cost, len(original_dialogue))
     return output, srt_path, vtt_path, costs
 
 

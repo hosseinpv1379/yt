@@ -3615,6 +3615,14 @@ async def worker(application: Application) -> None:
             job.delivery_started = True
             await _publish_progress(application, job, "ارسال ویدیو", 95)
             receipt = _receipt_text(job)
+            partial_dub_note = ""
+            if costs.undubbed_groups:
+                partial_dub_note = (
+                    f"در {costs.undubbed_groups} بخش، صدای اصلی حفظ شده است. "
+                    "ترجمهٔ فارسی آن بخش‌ها در فایل زیرنویس آمده است."
+                )
+                receipt += f"\n\n{partial_dub_note}"
+            include_srt = job.mode == "subtitle" or bool(partial_dub_note)
             completion_note = "پردازش کامل شد؛ ویدیوی آماده ارسال شد."
             use_player = (
                 job.mode == "subtitle"
@@ -3625,7 +3633,7 @@ async def worker(application: Application) -> None:
             sent_large = False
             if file_size > BOT_API_MAX_BYTES:
                 caption = (
-                    "🎙 دوبلهٔ فارسی آماده است." if job.mode == "dub" else
+                    f"🎙 دوبلهٔ فارسی آماده است. {partial_dub_note}".rstrip() if job.mode == "dub" else
                     "📝 ویدیو آماده است. فایل زیرنویس جداگانه ارسال می‌شود." if use_player else
                     "📝 ویدیو با زیرنویس فارسی آماده است."
                 )
@@ -3654,7 +3662,7 @@ async def worker(application: Application) -> None:
                     await stop_progress_updates()
                     await _send_download_link(
                         application, job, output, srt, state.settings, state.database,
-                        include_srt=job.mode == "subtitle",
+                        include_srt=include_srt,
                     )
                     await application.bot.delete_message(job.chat_id, job.message_id)
                     await application.bot.send_message(job.chat_id, ui.plain_screen(receipt), parse_mode="HTML")
@@ -3689,7 +3697,7 @@ async def worker(application: Application) -> None:
                             video=video_file,
                             supports_streaming=True,
                             caption=(
-                                ui.screen("دوبلهٔ فارسی آماده است", "صدای دوبله با صدای پس‌زمینه ترکیب شده است.", icon="🎙")
+                                ui.screen("دوبلهٔ فارسی آماده است", partial_dub_note or "صدای دوبله با صدای پس‌زمینه ترکیب شده است.", icon="🎙")
                                 if job.mode == "dub"
                                 else ui.screen("زیرنویس فارسی آماده است", "زیرنویس روی ویدیو قرار گرفت.", icon="📝")
                             ),
@@ -3705,7 +3713,7 @@ async def worker(application: Application) -> None:
                     await stop_progress_updates()
                     await _send_download_link(
                         application, job, output, srt, state.settings, state.database,
-                        include_srt=job.mode == "subtitle",
+                        include_srt=include_srt,
                     )
                     await application.bot.delete_message(job.chat_id, job.message_id)
                     await application.bot.send_message(job.chat_id, ui.plain_screen(receipt), parse_mode="HTML")
@@ -3731,7 +3739,7 @@ async def worker(application: Application) -> None:
                         application, job, completion_note + "\n\n" + receipt, complete=True
                     )
                 continue
-            if job.mode == "subtitle":
+            if include_srt:
                 await _send_srt(application, job, srt)
             await stop_progress_updates()
             await state.database.update_job(
